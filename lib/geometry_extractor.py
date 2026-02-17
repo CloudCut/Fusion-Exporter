@@ -153,11 +153,12 @@ def _extract_body(body):
         utils.log('  No suitable planar faces found, skipping.')
         return None
 
-    top_face, bottom_face, thickness_cm, pocket_faces, sheet_normal = result
+    top_face, bottom_faces, thickness_cm, pocket_faces, sheet_normal = result
 
     utils.log('  Sheet normal: ({:.4f}, {:.4f}, {:.4f})'.format(
         sheet_normal[0], sheet_normal[1], sheet_normal[2]))
     utils.log('  Thickness: {:.4f} cm'.format(thickness_cm))
+    utils.log('  Bottom faces: {}'.format(len(bottom_faces)))
     utils.log('  Pocket face groups: {}'.format(len(pocket_faces)))
 
     # Build a consistent projection frame from the top face
@@ -168,15 +169,21 @@ def _extract_body(body):
     # Collect operations
     operations_map = {}  # key: (op_type, depth_cm) -> list of contours
 
-    # Use the BOTTOM face for the outer profile and through-features.
-    # The bottom face is the full uninterrupted sheet surface — its outer loop
-    # is the true outer boundary (no pocket indentations), and its inner loops
-    # are only through-holes.
-    export_face = bottom_face if bottom_face else top_face
-    _extract_face_contours(export_face, thickness_cm, operations_map,
+    # OUTER PROFILE: from the top face's outer loop.
+    # The top face is typically a single intact face whose outer loop is
+    # the true part boundary. (The bottom face can be split into multiple
+    # faces when pockets at different depths intersect.)
+    _extract_outer_profile(top_face, thickness_cm, operations_map,
                            proj_origin, u_axis, v_axis)
 
-    # Extract pocket geometry from intermediate-level faces
+    # THROUGH-HOLES: from ALL bottom faces' inner loops.
+    # Inner loops on bottom faces are through-holes (circles = drill,
+    # non-circular = profile cut-through).
+    for bf in bottom_faces:
+        _extract_through_holes(bf['face'], thickness_cm, operations_map,
+                               proj_origin, u_axis, v_axis)
+
+    # POCKETS: from intermediate-level faces
     for pocket_depth_cm, faces in pocket_faces:
         _extract_pocket_contours(faces, pocket_depth_cm, operations_map,
                                  proj_origin, u_axis, v_axis)
@@ -203,8 +210,9 @@ def _classify_faces(body):
     4. Highest projection = top, lowest = bottom, intermediate = pockets.
 
     Returns:
-        (top_face, bottom_face, thickness_cm, pocket_faces, sheet_normal)
-        where pocket_faces is a list of (depth_cm, [face_dicts]) tuples
+        (top_face, bottom_faces, thickness_cm, pocket_faces, sheet_normal)
+        where bottom_faces is a list of face_dicts at the bottom level,
+        pocket_faces is a list of (depth_cm, [face_dicts]) tuples
         sorted by depth ascending (shallowest first),
         and sheet_normal is the (x, y, z) tuple of the sheet's normal direction.
         Returns None if no suitable planar faces found.
@@ -264,7 +272,7 @@ def _classify_faces(body):
     if thickness_cm < _LEVEL_TOL:
         # All faces at same level — flat body, no thickness
         largest = max(sheet_faces, key=lambda f: f['area'])
-        return largest['face'], None, 0, [], sheet_normal
+        return largest['face'], [], 0, [], sheet_normal
 
     top_candidates = []
     bottom_candidates = []
@@ -279,7 +287,6 @@ def _classify_faces(body):
             pocket_face_list.extend([(level, f) for f in faces])
 
     top_face = max(top_candidates, key=lambda f: f['area'])['face']
-    bottom_face = max(bottom_candidates, key=lambda f: f['area'])['face']
 
     utils.log('  Faces at top level ({:.4f}): {}, at bottom level ({:.4f}): {}'.format(
         highest, len(top_candidates), lowest, len(bottom_candidates)
@@ -310,7 +317,7 @@ def _classify_faces(body):
     # Sort by depth ascending (shallowest first)
     pocket_faces.sort(key=lambda x: x[0])
 
-    return top_face, bottom_face, thickness_cm, pocket_faces, sheet_normal
+    return top_face, bottom_candidates, thickness_cm, pocket_faces, sheet_normal
 
 
 def _group_faces_by_normal(planar_faces):
@@ -384,36 +391,54 @@ def _group_faces_by_level(faces, key='height'):
 # Face contour extraction
 # ---------------------------------------------------------------------------
 
-def _extract_face_contours(face, thickness_cm, operations_map,
+def _extract_outer_profile(face, thickness_cm, operations_map,
                            proj_origin, u_axis, v_axis):
-    """Extract contours from the bottom face's edge loops.
+    """Extract the outer profile from the top face's outer loop only.
 
-    The bottom face provides the outer profile and through-feature detection.
-    Its outer loop = outer boundary, inner loops = through-holes only.
+    The top face is typically a single intact face whose outer loop is the
+    true part boundary. We ignore its inner loops here — those are pocket
+    openings, not through-cuts.
     """
     for loop in face.loops:
+        if not loop.isOuter:
+            continue  # Skip inner loops (pocket openings on top face)
+
         contour = _extract_loop(loop, proj_origin, u_axis, v_axis)
         if contour is None:
             continue
 
-        is_outer = loop.isOuter
-        contour.is_outer = is_outer
+        contour.is_outer = True
+        key = ('profile', thickness_cm)
+        if key not in operations_map:
+            operations_map[key] = []
+        operations_map[key].append(contour)
+
+
+def _extract_through_holes(face, thickness_cm, operations_map,
+                            proj_origin, u_axis, v_axis):
+    """Extract through-holes from a bottom face's inner loops.
+
+    Inner loops on bottom faces are through-features: circles become drill
+    operations, non-circular loops become profile cut-throughs. Outer loops
+    on bottom faces are ignored (they're internal boundaries from face splitting,
+    not the true part outline).
+    """
+    for loop in face.loops:
+        if loop.isOuter:
+            continue  # Skip outer loop of bottom faces
+
+        contour = _extract_loop(loop, proj_origin, u_axis, v_axis)
+        if contour is None:
+            continue
+
+        contour.is_outer = False
 
         if _is_full_circle_contour(contour):
-            if is_outer:
-                op_type = 'profile'
-            else:
-                op_type = 'drill'
-            depth_cm = thickness_cm
-        elif is_outer:
-            op_type = 'profile'
-            depth_cm = thickness_cm
+            op_type = 'drill'
         else:
-            # Inner non-circular through-cut
             op_type = 'profile'
-            depth_cm = thickness_cm
 
-        key = (op_type, depth_cm)
+        key = (op_type, thickness_cm)
         if key not in operations_map:
             operations_map[key] = []
         operations_map[key].append(contour)
