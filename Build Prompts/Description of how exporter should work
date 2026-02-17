@@ -1,0 +1,103 @@
+This document outlines the technical architecture for a high-performance, non-destructive parts exporter for Fusion 360. By shifting from a "UI-heavy" (Sketch-based) approach to a "Data-heavy" (B-Rep Geometry) approach, we ensure scalability, speed, and timeline integrity.
+
+---
+
+## Technical Specification: High-Performance SVG Part Exporter
+
+### 1. Architectural Strategy: "The In-Memory Projection"
+
+Unlike standard exporters that create physical Sketch objects in the Fusion Timeline, this tool operates by reading the **B-Rep (Boundary Representation)** data directly.
+
+* **Non-Destructive:** No entities are created in the model; the "Undo" stack remains empty.
+* **Coordinate Space:** We define a 2D coordinate system  based on the selected "Top Face" of a part and map all 3D edges  into that 2D space via vector math.
+
+---
+
+### 2. Selection & Entity Resolution
+
+To handle the "Window Select" requirement, the script must parse a mixed bag of selections (Components, Bodies, and Occurrences).
+
+* **Recursive Search:** Iterate through `ui.activeSelections`. If a `Component` or `Occurrence` is selected, recursively traverse its `bRepBodies` collection.
+* **Unique UUID Tracking:** Map bodies by their `entityToken` to ensure that if a user selects both a component and a body inside it, the part is only processed once.
+* **Assembly Context:** Use `occurrence.transform` to determine the world-space orientation of a body. A part might be "flat" in its local file but "vertical" in the assembly.
+
+---
+
+### 3. Automated "Top Face" Detection
+
+For each body, the script must programmatically decide which face is the "machining face."
+
+#### The Heuristic Algorithm:
+
+1. **Filter Planar Faces:** Ignore fillets, rounds, and side edges by checking `face.geometry.objectType`.
+2. **Calculate Surface Area:** Identify the two largest parallel faces (typically the plywood sheets).
+3. **Feature Density Check:** Between the two largest faces, count the number of `loop` objects. The face with more internal loops (pockets/holes) is prioritized as the "Top Face."
+4. **Z-Axis Alignment:** If the "Arrange" tool was used, prioritize the face whose `face.geometry.normal` aligns with the Global   vector.
+
+---
+
+### 4. Geometry Extraction & Feature Recognition
+
+Once the Top Face is identified, we define its `Plane` as our SVG canvas.
+
+#### A. Perimeter & Holes (The "Z=0" Layer)
+
+* **Outer Loop:** Use `face.outerLoop`. Iterate through its `edges`.
+* **Inner Loops:** Use `face.loops` (excluding the outer one). These represent through-cuts or the entrance of pockets.
+* **Geometry Conversion:** Convert `BRepEdge` types (Line, Arc, Ellipse, NURBS) into SVG equivalents.
+* *Note:* Fusion Arcs are 3D. You must project the `startPoint`, `endPoint`, and `center` onto the face plane to get 2D values.
+
+
+
+#### B. Pocket & Depth Detection
+
+To find pockets that don't break through the material:
+
+1. Iterate through all *other* planar faces of the body.
+2. **Coplanar Check:** If a face's normal is parallel to the Top Face, calculate the `distanceTo` the Top Face plane.
+3. **Depth Tagging:** If the distance is  and , it is a pocket. Map its loops to the SVG and tag with the calculated depth.
+
+#### C. Drill Recognition
+
+* Identify `CylindricalFace` objects.
+* If the cylinder axis is parallel to the Top Face normal and the radius is constant, tag the center point as a **Drill Operation**.
+
+---
+
+### 5. Data Transformation (3D to 2D)
+
+To translate a 3D Point () to the SVG's 2D Point (), use the following vector logic:
+
+1. **Origin:** Let  be the `face.geometry.origin`.
+2. **Basis Vectors:** Let  and  be the `face.geometry.uDirection` and `vDirection`.
+3. **The Projection:**
+* 
+* 
+
+
+
+---
+
+### 6. The SVG Construction
+
+Since the built-in `saveAsSVG` is too limited, the script will manually construct an XML string.
+
+* **The Header:** Define `viewBox` based on the body’s `boundingBox` projected into  space.
+* **Path Data:** Use the **SVG Spec** provided to apply specific attributes:
+* `data-type="outside"` for the outer loop.
+* `data-type="pocket"` + `data-depth="x"` for recessed faces.
+* `data-type="drill"` for cylindrical centers.
+
+
+* **Unit Management:** Ensure all coordinates are converted from Fusion’s internal **Centimeters** to the target units (mm or inches) defined in the spec.
+
+---
+
+### 7. Proposed User Workflow
+
+1. **Select:** User selects components/bodies in the browser or canvas.
+2. **Run Tool:** The script opens a small palette showing a list of detected parts.
+3. **Validate:** The script "highlights" the detected Top Face of each part in the Fusion canvas. If a part looks wrong, the user can click a "Flip" button in the palette to swap to the opposite face.
+4. **Export:** User selects an output folder. The script batch-processes all parts and generates individual SVGs named by `Component Name` + `Part Number`.
+
+---

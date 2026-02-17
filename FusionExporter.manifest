@@ -1,0 +1,12 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "com.github.eric.fusionexporter",
+    "author": "Eric",
+    "description": {
+        "": "Export design geometry as SVG files for CNC toolpath generation."
+    },
+    "version": "1.0.0",
+    "runOnStartup": false,
+    "supportedOS": "mac"
+}

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:help.autodesk.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:modthemachine.typepad.com)",
+      "WebFetch(domain:blog.autodesk.io)",
+      "WebFetch(domain:tapnair.github.io)",
+      "WebFetch(domain:forums.autodesk.com)",
+      "WebFetch(domain:ekinssolutions.com)",
+      "WebFetch(domain:medium.com)",
+      "Bash(chmod:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
