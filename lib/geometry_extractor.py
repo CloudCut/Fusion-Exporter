@@ -329,21 +329,37 @@ def _classify_faces(body):
 
     utils.log('  Machining top level: {:.4f}'.format(machining_top_level))
 
-    # PROFILE FACE: Pick the side with fewer faces — it's more likely to have
-    # a single intact outer loop (the other side gets split by pocket geometry).
-    # If tied, use the machining-top side (it has the pocket openings but is
-    # often still a single face).
-    if len(high_candidates) <= len(low_candidates):
-        profile_face = max(high_candidates, key=lambda f: f['area'])['face']
-        through_hole_faces = low_candidates
+    # PROFILE FACE selection strategy:
+    # The machining-top face is the best profile candidate because its inner
+    # loops are pocket/counterbore openings (which we intentionally skip),
+    # while the bottom face's inner loops are true through-holes.
+    # However, if the machining-top side has MORE faces (split by intersecting
+    # pocket geometry), we must use the side with fewer faces for profile
+    # to get a clean outer loop.
+    if pockets_open_toward_high:
+        machining_top_candidates = high_candidates
+        bottom_candidates = low_candidates
     else:
-        profile_face = max(low_candidates, key=lambda f: f['area'])['face']
-        through_hole_faces = high_candidates
+        machining_top_candidates = low_candidates
+        bottom_candidates = high_candidates
 
-    utils.log('  Profile face from {} level ({} faces), through-holes from {} level ({} faces)'.format(
-        'high' if len(high_candidates) <= len(low_candidates) else 'low',
-        len(high_candidates) if len(high_candidates) <= len(low_candidates) else len(low_candidates),
-        'low' if len(high_candidates) <= len(low_candidates) else 'high',
+    if len(machining_top_candidates) <= len(bottom_candidates):
+        # Machining top has fewer or equal faces — use it for profile.
+        # Through-holes come from the bottom (only true through-features).
+        profile_candidates = machining_top_candidates
+        through_hole_faces = bottom_candidates
+    else:
+        # Machining top is split — use bottom for profile (cleaner outer loop).
+        # Through-holes come from machining top (may include pocket openings).
+        profile_candidates = bottom_candidates
+        through_hole_faces = machining_top_candidates
+
+    profile_face = max(profile_candidates, key=lambda f: f['area'])['face']
+
+    profile_side = 'machining-top' if profile_candidates is machining_top_candidates else 'bottom'
+    utils.log('  Profile face from {} ({} faces), through-holes from {} ({} faces)'.format(
+        profile_side, len(profile_candidates),
+        'bottom' if profile_side == 'machining-top' else 'machining-top',
         len(through_hole_faces)
     ))
 
@@ -525,6 +541,9 @@ def _extract_pocket_contours(face_dicts, pocket_depth_cm, operations_map,
                 continue
 
             contour.is_outer = True
+
+            # All partial-depth features are pockets (including blind holes).
+            # Only through-holes at material thickness are drill operations.
             op_type = 'pocket'
 
             key = (op_type, pocket_depth_cm)
@@ -1017,15 +1036,25 @@ def dump_debug_report(bodies, file_path):
 
             lines.append('  Machining top level: {:.6f}'.format(machining_top_level))
 
-            # Profile face selection
-            if len(high_faces) <= len(low_faces):
-                profile_side = 'high'
-                through_hole_side = 'low'
+            # Profile face selection (matches _classify_faces logic)
+            pockets_open_high = True  # default
+            if pocket_list and thickness > _LEVEL_TOL:
+                pockets_open_high = pockets_open_toward_high
+            if pockets_open_high:
+                mt_faces = high_faces
+                bt_faces = low_faces
             else:
-                profile_side = 'low'
-                through_hole_side = 'high'
-            lines.append('  Profile face from {} level, through-holes from {} level'.format(
-                profile_side, through_hole_side))
+                mt_faces = low_faces
+                bt_faces = high_faces
+            if len(mt_faces) <= len(bt_faces):
+                profile_side = 'machining-top'
+                through_hole_side = 'bottom'
+            else:
+                profile_side = 'bottom'
+                through_hole_side = 'machining-top'
+            lines.append('  Profile face from {} ({} faces), through-holes from {} ({} faces)'.format(
+                profile_side, len(mt_faces) if profile_side == 'machining-top' else len(bt_faces),
+                through_hole_side, len(bt_faces) if profile_side == 'machining-top' else len(mt_faces)))
 
             lines.append('')
             lines.append('  Height-level groups: {}'.format(len(height_groups)))
