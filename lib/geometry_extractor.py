@@ -7,7 +7,6 @@ contours, and path segments that can be converted to SVG.
 import adsk.core
 import adsk.fusion
 import math
-import os
 
 from . import utils
 
@@ -153,33 +152,37 @@ def _extract_body(body):
         utils.log('  No suitable planar faces found, skipping.')
         return None
 
-    top_face, bottom_faces, thickness_cm, pocket_faces, sheet_normal = result
+    profile_face = result['profile_face']
+    through_hole_faces = result['through_hole_faces']
+    thickness_cm = result['thickness_cm']
+    pocket_faces = result['pocket_faces']
+    sheet_normal = result['sheet_normal']
 
     utils.log('  Sheet normal: ({:.4f}, {:.4f}, {:.4f})'.format(
         sheet_normal[0], sheet_normal[1], sheet_normal[2]))
     utils.log('  Thickness: {:.4f} cm'.format(thickness_cm))
-    utils.log('  Bottom faces: {}'.format(len(bottom_faces)))
+    utils.log('  Through-hole faces: {}'.format(len(through_hole_faces)))
     utils.log('  Pocket face groups: {}'.format(len(pocket_faces)))
 
-    # Build a consistent projection frame from the top face
-    top_plane = top_face.geometry
-    u_axis, v_axis = _build_face_axes(top_plane)
-    proj_origin = top_plane.origin
+    # Build a consistent projection frame from the profile face
+    prof_plane = profile_face.geometry
+    u_axis, v_axis = _build_face_axes(prof_plane)
+    proj_origin = prof_plane.origin
 
     # Collect operations
     operations_map = {}  # key: (op_type, depth_cm) -> list of contours
 
-    # OUTER PROFILE: from the top face's outer loop.
-    # The top face is typically a single intact face whose outer loop is
-    # the true part boundary. (The bottom face can be split into multiple
-    # faces when pockets at different depths intersect.)
-    _extract_outer_profile(top_face, thickness_cm, operations_map,
+    # OUTER PROFILE: from the profile face's outer loop.
+    # This is the single intact face whose outer loop is the true part
+    # boundary. (The opposite side can be split into multiple faces when
+    # pockets at different depths intersect.)
+    _extract_outer_profile(profile_face, thickness_cm, operations_map,
                            proj_origin, u_axis, v_axis)
 
-    # THROUGH-HOLES: from ALL bottom faces' inner loops.
-    # Inner loops on bottom faces are through-holes (circles = drill,
+    # THROUGH-HOLES: from all through-hole faces' inner loops.
+    # Inner loops on the opposite side are through-holes (circles = drill,
     # non-circular = profile cut-through).
-    for bf in bottom_faces:
+    for bf in through_hole_faces:
         _extract_through_holes(bf['face'], thickness_cm, operations_map,
                                proj_origin, u_axis, v_axis)
 
@@ -210,11 +213,12 @@ def _classify_faces(body):
     4. Highest projection = top, lowest = bottom, intermediate = pockets.
 
     Returns:
-        (top_face, bottom_faces, thickness_cm, pocket_faces, sheet_normal)
-        where bottom_faces is a list of face_dicts at the bottom level,
-        pocket_faces is a list of (depth_cm, [face_dicts]) tuples
-        sorted by depth ascending (shallowest first),
-        and sheet_normal is the (x, y, z) tuple of the sheet's normal direction.
+        dict with keys:
+            'profile_face': BRepFace for outer profile (single intact face)
+            'through_hole_faces': list of face_dicts for through-hole detection
+            'thickness_cm': material thickness in cm
+            'pocket_faces': list of (depth_cm, [face_dicts]) tuples
+            'sheet_normal': (x, y, z) tuple of the sheet's normal direction
         Returns None if no suitable planar faces found.
     """
     # Collect all planar faces
@@ -272,24 +276,75 @@ def _classify_faces(body):
     if thickness_cm < _LEVEL_TOL:
         # All faces at same level — flat body, no thickness
         largest = max(sheet_faces, key=lambda f: f['area'])
-        return largest['face'], [], 0, [], sheet_normal
+        return {
+            'profile_face': largest['face'],
+            'through_hole_faces': [],
+            'thickness_cm': 0,
+            'pocket_faces': [],
+            'sheet_normal': sheet_normal,
+        }
 
-    top_candidates = []
-    bottom_candidates = []
+    high_candidates = []
+    low_candidates = []
     pocket_face_list = []
 
     for level, faces in height_groups:
         if abs(level - highest) < _LEVEL_TOL:
-            top_candidates.extend(faces)
+            high_candidates.extend(faces)
         elif abs(level - lowest) < _LEVEL_TOL:
-            bottom_candidates.extend(faces)
+            low_candidates.extend(faces)
         else:
             pocket_face_list.extend([(level, f) for f in faces])
 
-    top_face = max(top_candidates, key=lambda f: f['area'])['face']
+    # Determine which side the pockets open from using pocket face outward normals.
+    # The outward normal of a pocket bottom face points into the pocket cavity
+    # (toward the pocket opening = the machining top of the sheet).
+    # If the dot product of the pocket face outward normal with the sheet normal
+    # is negative, pockets open toward the low-projection side (low = machining top).
+    # If positive, pockets open toward the high-projection side (high = machining top).
+    pockets_open_toward_high = True  # default
+    if pocket_face_list:
+        dot_sum = 0.0
+        for _, pf in pocket_face_list:
+            face_obj = pf['face']
+            fn = pf['normal']
+            # Determine the outward normal (face normal, accounting for isParamReversed)
+            if face_obj.isParamReversed:
+                outward = (-fn[0], -fn[1], -fn[2])
+            else:
+                outward = fn
+            dot_sum += (outward[0] * sheet_normal[0] +
+                        outward[1] * sheet_normal[1] +
+                        outward[2] * sheet_normal[2])
+        pockets_open_toward_high = dot_sum > 0
+        utils.log('  Pocket normal dot sum: {:.4f} → pockets open toward {} level'.format(
+            dot_sum, 'high' if pockets_open_toward_high else 'low'))
 
-    utils.log('  Faces at top level ({:.4f}): {}, at bottom level ({:.4f}): {}'.format(
-        highest, len(top_candidates), lowest, len(bottom_candidates)
+    # The machining top is the side the pockets open toward.
+    # Pocket depth is measured from the machining top level.
+    if pockets_open_toward_high:
+        machining_top_level = highest
+    else:
+        machining_top_level = lowest
+
+    utils.log('  Machining top level: {:.4f}'.format(machining_top_level))
+
+    # PROFILE FACE: Pick the side with fewer faces — it's more likely to have
+    # a single intact outer loop (the other side gets split by pocket geometry).
+    # If tied, use the machining-top side (it has the pocket openings but is
+    # often still a single face).
+    if len(high_candidates) <= len(low_candidates):
+        profile_face = max(high_candidates, key=lambda f: f['area'])['face']
+        through_hole_faces = low_candidates
+    else:
+        profile_face = max(low_candidates, key=lambda f: f['area'])['face']
+        through_hole_faces = high_candidates
+
+    utils.log('  Profile face from {} level ({} faces), through-holes from {} level ({} faces)'.format(
+        'high' if len(high_candidates) <= len(low_candidates) else 'low',
+        len(high_candidates) if len(high_candidates) <= len(low_candidates) else len(low_candidates),
+        'low' if len(high_candidates) <= len(low_candidates) else 'high',
+        len(through_hole_faces)
     ))
 
     # Group pocket faces by level
@@ -305,10 +360,10 @@ def _classify_faces(body):
         if not matched:
             pocket_groups[level] = [f]
 
-    # Convert to (depth_from_top, faces) tuples
+    # Convert to (depth_from_machining_top, faces) tuples.
     pocket_faces = []
     for level, faces in pocket_groups.items():
-        depth_cm = highest - level
+        depth_cm = abs(machining_top_level - level)
         pocket_faces.append((depth_cm, faces))
         utils.log('  Pocket group at level={:.4f} (depth={:.4f} cm): {} face(s)'.format(
             level, depth_cm, len(faces)
@@ -317,7 +372,13 @@ def _classify_faces(body):
     # Sort by depth ascending (shallowest first)
     pocket_faces.sort(key=lambda x: x[0])
 
-    return top_face, bottom_candidates, thickness_cm, pocket_faces, sheet_normal
+    return {
+        'profile_face': profile_face,
+        'through_hole_faces': through_hole_faces,
+        'thickness_cm': thickness_cm,
+        'pocket_faces': pocket_faces,
+        'sheet_normal': sheet_normal,
+    }
 
 
 def _group_faces_by_normal(planar_faces):
@@ -917,25 +978,77 @@ def dump_debug_report(bodies, file_path):
             heights = [h for h, _ in height_groups]
             highest_h = max(heights)
             lowest_h = min(heights)
+            thickness = highest_h - lowest_h
             lines.append('  Highest level: {:.6f}'.format(highest_h))
             lines.append('  Lowest level: {:.6f}'.format(lowest_h))
-            lines.append('  Thickness: {:.6f} cm = {:.4f} mm'.format(
-                highest_h - lowest_h, (highest_h - lowest_h) * 10
+            lines.append('  Thickness: {:.6f} cm = {:.4f} mm = {:.6f} in'.format(
+                thickness, thickness * 10, thickness / 2.54
             ))
 
+            # Determine machining top using pocket face outward normals
+            high_faces = []
+            low_faces = []
+            pocket_list = []
+            for level, group in height_groups:
+                if abs(level - highest_h) < _LEVEL_TOL:
+                    high_faces.extend(group)
+                elif abs(level - lowest_h) < _LEVEL_TOL:
+                    low_faces.extend(group)
+                else:
+                    pocket_list.extend([(level, f) for f in group])
+
+            machining_top_level = highest_h  # default
+            if pocket_list and thickness > _LEVEL_TOL:
+                dot_sum = 0.0
+                for _, pf in pocket_list:
+                    face_obj = pf['face']
+                    fn = pf['normal']
+                    if face_obj.isParamReversed:
+                        outward = (-fn[0], -fn[1], -fn[2])
+                    else:
+                        outward = fn
+                    dot_sum += (outward[0] * sn[0] +
+                                outward[1] * sn[1] +
+                                outward[2] * sn[2])
+                pockets_open_toward_high = dot_sum > 0
+                machining_top_level = highest_h if pockets_open_toward_high else lowest_h
+                lines.append('  Pocket normal dot sum: {:.4f} → pockets open toward {} level'.format(
+                    dot_sum, 'high' if pockets_open_toward_high else 'low'))
+
+            lines.append('  Machining top level: {:.6f}'.format(machining_top_level))
+
+            # Profile face selection
+            if len(high_faces) <= len(low_faces):
+                profile_side = 'high'
+                through_hole_side = 'low'
+            else:
+                profile_side = 'low'
+                through_hole_side = 'high'
+            lines.append('  Profile face from {} level, through-holes from {} level'.format(
+                profile_side, through_hole_side))
+
+            lines.append('')
             lines.append('  Height-level groups: {}'.format(len(height_groups)))
             for hgi, (level, group) in enumerate(height_groups):
                 face_indices = [f.get('idx', '?') for f in group]
                 label = ''
                 if abs(level - highest_h) < _LEVEL_TOL:
-                    label = ' <-- TOP'
+                    label = ' <-- HIGH'
                 elif abs(level - lowest_h) < _LEVEL_TOL:
-                    label = ' <-- BOTTOM'
-                else:
-                    depth = highest_h - level
-                    label = ' <-- POCKET (depth={:.4f} cm = {:.4f} mm)'.format(
-                        depth, depth * 10
+                    label = ' <-- LOW'
+
+                if thickness > _LEVEL_TOL and abs(level - highest_h) > _LEVEL_TOL and abs(level - lowest_h) > _LEVEL_TOL:
+                    depth = abs(machining_top_level - level)
+                    label = ' <-- POCKET (depth={:.4f} cm = {:.4f} mm = {:.6f} in)'.format(
+                        depth, depth * 10, depth / 2.54
                     )
+
+                # Add machining-top / bottom annotation
+                if abs(level - machining_top_level) < _LEVEL_TOL:
+                    label += ' [MACHINING TOP]'
+                elif abs(level - highest_h) < _LEVEL_TOL or abs(level - lowest_h) < _LEVEL_TOL:
+                    label += ' [BOTTOM]'
+
                 lines.append('    Group {}: level={:.6f}, faces={}{}'.format(
                     hgi, level, face_indices, label
                 ))
