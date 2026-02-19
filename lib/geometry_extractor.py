@@ -525,22 +525,23 @@ def _extract_pocket_contours(face_dicts, pocket_depth_cm, operations_map,
                               proj_origin, u_axis, v_axis):
     """Extract pocket contours from faces at a given Z level.
 
-    Only extracts the OUTER loop of each face. Inner loops on pocket faces
-    represent either deeper pocket openings or through-holes — both of which
-    are detected separately (deeper pockets by their own face group,
-    through-holes from the bottom face).
+    Extracts BOTH outer and inner loops from each pocket face:
+    - Outer loops define the pocket boundary.
+    - Inner loops define islands (raised areas), deeper pocket openings, or
+      through-hole boundaries within the pocket.
+
+    All are emitted as separate paths in the same pocket operation group.
+    The CAM parser uses containment analysis to determine which paths are
+    outer boundaries and which are islands.
     """
     for fd in face_dicts:
         face = fd['face']
         for loop in face.loops:
-            if not loop.isOuter:
-                continue  # Skip inner loops on pocket faces
-
             contour = _extract_loop(loop, proj_origin, u_axis, v_axis)
             if contour is None:
                 continue
 
-            contour.is_outer = True
+            contour.is_outer = loop.isOuter
 
             # All partial-depth features are pockets (including blind holes).
             # Only through-holes at material thickness are drill operations.
