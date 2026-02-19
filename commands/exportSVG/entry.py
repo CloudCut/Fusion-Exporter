@@ -7,7 +7,7 @@ import traceback
 import importlib
 
 import config
-from lib import utils, geometry_extractor, path_converter, svg_builder
+from lib import utils, geometry_extractor, path_converter, svg_builder, json_builder
 
 # Reload order matters: dependencies first
 importlib.reload(config)
@@ -15,6 +15,7 @@ importlib.reload(utils)
 importlib.reload(geometry_extractor)
 importlib.reload(path_converter)
 importlib.reload(svg_builder)
+importlib.reload(json_builder)
 
 # Globals for cleanup
 _handlers = []
@@ -124,6 +125,15 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             units_dropdown.listItems.add('Millimeters (mm)', is_metric, '')
             units_dropdown.listItems.add('Inches (in)', not is_metric, '')
 
+            # Output format dropdown
+            format_dropdown = inputs.addDropDownCommandInput(
+                'outputFormat',
+                'Output Format',
+                adsk.core.DropDownStyles.TextListDropDownStyle
+            )
+            format_dropdown.listItems.add('SVG', True, '')
+            format_dropdown.listItems.add('JSON', False, '')
+
             # Connect event handlers
             on_validate = ValidateInputsHandler()
             cmd.validateInputs.add(on_validate)
@@ -174,6 +184,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             # Gather inputs
             body_input = inputs.itemById('bodySelection')
             units_dropdown = inputs.itemById('outputUnits')
+            format_dropdown = inputs.itemById('outputFormat')
 
             bodies = []
             for i in range(body_input.selectionCount):
@@ -189,25 +200,34 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             selected_unit = units_dropdown.selectedItem.name
             output_unit = 'mm' if 'mm' in selected_unit else 'in'
 
+            # Determine output format
+            export_format = 'json' if format_dropdown.selectedItem.name == 'JSON' else 'svg'
+            file_ext = '.' + export_format
+            format_label = export_format.upper()
+
             # Show file save dialog
             file_dialog = ui.createFileDialog()
             file_dialog.isMultiSelectEnabled = False
-            file_dialog.title = 'Save SVG File'
-            file_dialog.filter = 'SVG Files (*.svg)'
+            if export_format == 'json':
+                file_dialog.title = 'Save JSON File'
+                file_dialog.filter = 'JSON Files (*.json)'
+            else:
+                file_dialog.title = 'Save SVG File'
+                file_dialog.filter = 'SVG Files (*.svg)'
 
             # Default filename from design name
             doc_name = app.activeDocument.name if app.activeDocument else 'export'
-            file_dialog.initialFilename = doc_name + '.svg'
+            file_dialog.initialFilename = doc_name + file_ext
 
             result = file_dialog.showSave()
             if result != adsk.core.DialogResults.DialogOK:
                 return
 
             file_path = file_dialog.filename
-            if not file_path.lower().endswith('.svg'):
-                file_path += '.svg'
+            if not file_path.lower().endswith(file_ext):
+                file_path += file_ext
 
-            utils.log('Starting SVG export...')
+            utils.log('Starting {} export...'.format(format_label))
             utils.log('Bodies: {}'.format(len(bodies)))
             utils.log('Output unit: {}'.format(output_unit))
 
@@ -231,17 +251,20 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                 )
                 return
 
-            # Build SVG
-            svg_content = svg_builder.build_svg(components, output_unit)
+            # Build output
+            if export_format == 'json':
+                content = json_builder.build_json(components, output_unit)
+            else:
+                content = svg_builder.build_svg(components, output_unit)
 
             # Write file
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(svg_content)
+                    f.write(content)
             except (IOError, OSError) as e:
                 ui.messageBox(
-                    'Failed to write SVG file:\n{}\n\n'
-                    'Check file permissions and path.'.format(str(e))
+                    'Failed to write {} file:\n{}\n\n'
+                    'Check file permissions and path.'.format(format_label, str(e))
                 )
                 return
 
@@ -255,14 +278,14 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
             utils.log('Export complete: {}'.format(file_path))
             ui.messageBox(
-                'SVG exported successfully!\n\n'
+                '{} exported successfully!\n\n'
                 'File: {}\n'
                 'Components: {}\n'
                 'Operations: {}\n'
                 'Paths: {}\n\n'
                 'Debug report: {}'.format(
-                    file_path, len(components), total_ops, total_paths,
-                    debug_path
+                    format_label, file_path, len(components), total_ops,
+                    total_paths, debug_path
                 )
             )
 

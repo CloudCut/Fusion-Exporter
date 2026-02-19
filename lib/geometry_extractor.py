@@ -704,16 +704,18 @@ def _tessellate_edge(edge, is_opposed, origin, u_axis, v_axis):
 def _build_face_axes(plane):
     """Build an orthonormal U/V coordinate frame from a Plane.
 
-    For horizontal faces (normal along Z), returns X and Y axes directly
-    so the 2D projection preserves Fusion's XY layout.
+    V is negated so that the projection outputs SVG-compatible Y-down
+    coordinates directly.  Fusion's Y-up (or the face's "physical up")
+    maps to negative V, which means small SVG-Y = top of the workpiece.
 
-    For non-horizontal faces, builds a general orthonormal frame.
+    For horizontal faces (normal along Z): U = +X, V = -Y.
+    For non-horizontal faces: general orthonormal frame with V negated.
     """
     normal = plane.normal
 
     if abs(normal.z) > 0.9:
         u = adsk.core.Vector3D.create(1, 0, 0)
-        v = adsk.core.Vector3D.create(0, 1, 0)
+        v = adsk.core.Vector3D.create(0, -1, 0)
         return u, v
 
     ref = adsk.core.Vector3D.create(0, 0, 1)
@@ -725,10 +727,11 @@ def _build_face_axes(plane):
     )
     u.normalize()
 
+    # Compute normal × u, then negate for SVG Y-down convention
     v = adsk.core.Vector3D.create(
-        normal.y * u.z - normal.z * u.y,
-        normal.z * u.x - normal.x * u.z,
-        normal.x * u.y - normal.y * u.x
+        -(normal.y * u.z - normal.z * u.y),
+        -(normal.z * u.x - normal.x * u.z),
+        -(normal.x * u.y - normal.y * u.x)
     )
     v.normalize()
 
