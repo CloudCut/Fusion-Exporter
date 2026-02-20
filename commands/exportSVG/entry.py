@@ -134,7 +134,28 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             format_dropdown.listItems.add('SVG', True, '')
             format_dropdown.listItems.add('JSON', False, '')
 
+            # Appearance filter dropdown
+            root = design.rootComponent
+            appearance_names = set()
+            for body in root.bRepBodies:
+                appearance_names.add(body.appearance.name)
+            for occ in root.allOccurrences:
+                for body in occ.bRepBodies:
+                    appearance_names.add(body.appearance.name)
+
+            appearance_dropdown = inputs.addDropDownCommandInput(
+                'appearanceFilter',
+                'Appearances',
+                adsk.core.DropDownStyles.CheckBoxDropDownStyle
+            )
+            appearance_dropdown.listItems.add('All', True, '')
+            for name in sorted(appearance_names):
+                appearance_dropdown.listItems.add(name, True, '')
+
             # Connect event handlers
+            on_input_changed = InputChangedHandler()
+            cmd.inputChanged.add(on_input_changed)
+            _handlers.append(on_input_changed)
             on_validate = ValidateInputsHandler()
             cmd.validateInputs.add(on_validate)
             _handlers.append(on_validate)
@@ -152,6 +173,42 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             app.userInterface.messageBox(
                 'Command creation failed:\n{}'.format(traceback.format_exc())
             )
+
+
+class InputChangedHandler(adsk.core.InputChangedEventHandler):
+    def __init__(self):
+        super().__init__()
+
+    def notify(self, args):
+        try:
+            changed_input = args.input
+            if changed_input.id != 'appearanceFilter':
+                return
+
+            dropdown = changed_input
+            items = dropdown.listItems
+            all_item = items.item(0)
+            individual_items = [items.item(i) for i in range(1, items.count)]
+
+            if all_item.isSelected:
+                # If All is checked but some individual is unchecked,
+                # "All" was just checked — select all individuals
+                if any(not item.isSelected for item in individual_items):
+                    for item in individual_items:
+                        item.isSelected = True
+            else:
+                # All is unchecked — if every individual is still checked,
+                # "All" was just unchecked — uncheck all individuals
+                if all(item.isSelected for item in individual_items):
+                    for item in individual_items:
+                        item.isSelected = False
+
+            # Auto-check "All" when every individual material is checked
+            if all(item.isSelected for item in individual_items) and not all_item.isSelected:
+                all_item.isSelected = True
+
+        except Exception:
+            pass
 
 
 class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
@@ -194,6 +251,20 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
             if not bodies:
                 ui.messageBox('No bodies selected.')
+                return
+
+            # Filter bodies by appearance
+            appearance_dropdown = inputs.itemById('appearanceFilter')
+            checked_appearances = set()
+            items = appearance_dropdown.listItems
+            for i in range(1, items.count):  # skip "All"
+                if items.item(i).isSelected:
+                    checked_appearances.add(items.item(i).name)
+
+            bodies = [b for b in bodies if b.appearance.name in checked_appearances]
+
+            if not bodies:
+                ui.messageBox('No bodies match the selected appearances.')
                 return
 
             # Determine output unit
