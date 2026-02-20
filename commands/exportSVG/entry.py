@@ -134,6 +134,11 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             format_dropdown.listItems.add('SVG', True, '')
             format_dropdown.listItems.add('JSON', False, '')
 
+            # Filter section label
+            inputs.addTextBoxCommandInput(
+                'filterLabel', '', '<b>Filter export by:</b>', 1, True
+            )
+
             # Appearance filter dropdown
             root = design.rootComponent
             appearance_names = set()
@@ -151,6 +156,16 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             appearance_dropdown.listItems.add('All', True, '')
             for name in sorted(appearance_names):
                 appearance_dropdown.listItems.add(name, True, '')
+
+            # Thickness filter dropdown (populated dynamically when bodies are selected)
+            thickness_dropdown = inputs.addDropDownCommandInput(
+                'thicknessFilter',
+                'Thicknesses',
+                adsk.core.DropDownStyles.CheckBoxDropDownStyle
+            )
+
+            # Pre-populate if bodies are already selected
+            _rebuild_thickness_dropdown(thickness_dropdown, body_input)
 
             # Connect event handlers
             on_input_changed = InputChangedHandler()
@@ -175,6 +190,89 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             )
 
 
+def _rebuild_thickness_dropdown(thickness_dropdown, body_input):
+    """Rebuild the thickness checkbox dropdown from the currently selected bodies."""
+    app = adsk.core.Application.get()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+
+    # Determine display unit from the units dropdown
+    inputs = thickness_dropdown.parentCommandInput or None
+    output_unit = 'in'
+    try:
+        units_dropdown = thickness_dropdown.commandInputs.itemById('outputUnits')
+        if units_dropdown and 'mm' in units_dropdown.selectedItem.name:
+            output_unit = 'mm'
+    except Exception:
+        # Fall back to design units
+        if design:
+            default_unit = design.unitsManager.defaultLengthUnits
+            if 'mm' in default_unit or 'cm' in default_unit or 'meter' in default_unit:
+                output_unit = 'mm'
+
+    # Clear existing items
+    items = thickness_dropdown.listItems
+    for i in range(items.count - 1, -1, -1):
+        items.item(i).deleteMe()
+
+    # Gather selected bodies
+    bodies = []
+    for i in range(body_input.selectionCount):
+        entity = body_input.selection(i).entity
+        if isinstance(entity, adsk.fusion.BRepBody):
+            bodies.append(entity)
+
+    if not bodies:
+        return
+
+    # Compute unique thicknesses
+    thicknesses = set()
+    for body in bodies:
+        t = geometry_extractor.get_body_thickness(body)
+        if t is None:
+            t = 0.0
+        thicknesses.add(round(t, 4))
+
+    # Add "All" + individual thicknesses, all checked
+    if len(thicknesses) > 1:
+        thickness_dropdown.listItems.add('All', True, '')
+    for t_cm in sorted(thicknesses):
+        if output_unit == 'mm':
+            label = '{:.2f} mm'.format(t_cm * 10)
+        else:
+            label = '{:.4f} in'.format(t_cm / 2.54)
+        thickness_dropdown.listItems.add(label, True, '')
+
+
+_prev_all_state = {}  # dropdown id -> bool
+
+
+def _handle_all_toggle(dropdown):
+    """Handle 'All' checkbox toggle logic for a CheckBoxDropDown."""
+    items = dropdown.listItems
+    if items.count < 2:
+        return
+
+    all_item = items.item(0)
+    if all_item.name != 'All':
+        return
+
+    individual_items = [items.item(i) for i in range(1, items.count)]
+    prev_all = _prev_all_state.get(dropdown.id, True)
+    curr_all = all_item.isSelected
+
+    if curr_all != prev_all:
+        # User toggled "All" — apply to all individuals
+        for item in individual_items:
+            item.isSelected = curr_all
+    else:
+        # User toggled an individual — sync "All" to match
+        all_item.isSelected = all(
+            item.isSelected for item in individual_items
+        )
+
+    _prev_all_state[dropdown.id] = all_item.isSelected
+
+
 class InputChangedHandler(adsk.core.InputChangedEventHandler):
     def __init__(self):
         super().__init__()
@@ -182,30 +280,18 @@ class InputChangedHandler(adsk.core.InputChangedEventHandler):
     def notify(self, args):
         try:
             changed_input = args.input
-            if changed_input.id != 'appearanceFilter':
+            inputs = args.inputs
+
+            if changed_input.id == 'bodySelection':
+                # Rebuild thickness dropdown when body selection changes
+                thickness_dropdown = inputs.itemById('thicknessFilter')
+                body_input = inputs.itemById('bodySelection')
+                if thickness_dropdown and body_input:
+                    _rebuild_thickness_dropdown(thickness_dropdown, body_input)
                 return
 
-            dropdown = changed_input
-            items = dropdown.listItems
-            all_item = items.item(0)
-            individual_items = [items.item(i) for i in range(1, items.count)]
-
-            if all_item.isSelected:
-                # If All is checked but some individual is unchecked,
-                # "All" was just checked — select all individuals
-                if any(not item.isSelected for item in individual_items):
-                    for item in individual_items:
-                        item.isSelected = True
-            else:
-                # All is unchecked — if every individual is still checked,
-                # "All" was just unchecked — uncheck all individuals
-                if all(item.isSelected for item in individual_items):
-                    for item in individual_items:
-                        item.isSelected = False
-
-            # Auto-check "All" when every individual material is checked
-            if all(item.isSelected for item in individual_items) and not all_item.isSelected:
-                all_item.isSelected = True
+            if changed_input.id in ('appearanceFilter', 'thicknessFilter'):
+                _handle_all_toggle(changed_input)
 
         except Exception:
             pass
@@ -271,12 +357,44 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             selected_unit = units_dropdown.selectedItem.name
             output_unit = 'mm' if 'mm' in selected_unit else 'in'
 
+            # Read checked thicknesses from the dropdown
+            thickness_dropdown = inputs.itemById('thicknessFilter')
+            checked_labels = set()
+            t_items = thickness_dropdown.listItems
+            for i in range(t_items.count):
+                item = t_items.item(i)
+                if item.name != 'All' and item.isSelected:
+                    checked_labels.add(item.name)
+
+            # Group bodies by thickness
+            thickness_groups = {}  # label -> list of bodies
+            for body in bodies:
+                t = geometry_extractor.get_body_thickness(body)
+                if t is None:
+                    t = 0.0
+                t_rounded = round(t, 4)
+                if output_unit == 'mm':
+                    label = '{:.2f} mm'.format(t_rounded * 10)
+                else:
+                    label = '{:.4f} in'.format(t_rounded / 2.54)
+                thickness_groups.setdefault(label, []).append(body)
+
+            # Keep only groups whose label is checked
+            export_groups = {
+                label: group for label, group in thickness_groups.items()
+                if label in checked_labels
+            }
+
+            if not export_groups:
+                ui.messageBox('No bodies match the selected thicknesses.')
+                return
+
             # Determine output format
             export_format = 'json' if format_dropdown.selectedItem.name == 'JSON' else 'svg'
             file_ext = '.' + export_format
             format_label = export_format.upper()
 
-            # Show file save dialog
+            # Show file save dialog (user picks base filename)
             file_dialog = ui.createFileDialog()
             file_dialog.isMultiSelectEnabled = False
             if export_format == 'json':
@@ -286,7 +404,6 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                 file_dialog.title = 'Save SVG File'
                 file_dialog.filter = 'SVG Files (*.svg)'
 
-            # Default filename from design name
             doc_name = app.activeDocument.name if app.activeDocument else 'export'
             file_dialog.initialFilename = doc_name + file_ext
 
@@ -294,71 +411,80 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             if result != adsk.core.DialogResults.DialogOK:
                 return
 
-            file_path = file_dialog.filename
-            if not file_path.lower().endswith(file_ext):
-                file_path += file_ext
+            base_path = file_dialog.filename
+            if base_path.lower().endswith(file_ext):
+                base_path = base_path[:-len(file_ext)]
 
-            utils.log('Starting {} export...'.format(format_label))
-            utils.log('Bodies: {}'.format(len(bodies)))
-            utils.log('Output unit: {}'.format(output_unit))
+            # Export one file per thickness group
+            exported_files = []
+            all_debug_path = base_path + '_debug.txt'
 
-            # Write debug report next to the SVG file
-            debug_path = os.path.splitext(file_path)[0] + '_debug.txt'
-            try:
-                geometry_extractor.dump_debug_report(bodies, debug_path)
-            except Exception:
-                utils.log('Warning: debug report failed: {}'.format(
-                    traceback.format_exc()))
+            for label, group_bodies in sorted(export_groups.items()):
+                # Build filename: base_0.75in.svg or base_19.05mm.svg
+                thickness_tag = label.replace(' ', '')
+                file_path = '{}_{}{}'.format(base_path, thickness_tag, file_ext)
 
-            # Extract geometry (material thickness auto-detected per body)
-            components = geometry_extractor.extract_from_bodies(bodies)
+                utils.log('Starting {} export for thickness {}...'.format(
+                    format_label, label))
+                utils.log('Bodies: {}'.format(len(group_bodies)))
+                utils.log('Output unit: {}'.format(output_unit))
 
-            if not components:
+                # Write debug report (once, for all bodies)
+                if not exported_files:
+                    try:
+                        all_bodies = []
+                        for g in export_groups.values():
+                            all_bodies.extend(g)
+                        geometry_extractor.dump_debug_report(
+                            all_bodies, all_debug_path)
+                    except Exception:
+                        utils.log('Warning: debug report failed: {}'.format(
+                            traceback.format_exc()))
+
+                # Extract geometry
+                components = geometry_extractor.extract_from_bodies(group_bodies)
+
+                if not components:
+                    utils.log('No exportable geometry for thickness {}, '
+                              'skipping.'.format(label))
+                    continue
+
+                # Build output
+                if export_format == 'json':
+                    content = json_builder.build_json(components, output_unit)
+                else:
+                    content = svg_builder.build_svg(components, output_unit)
+
+                # Write file
+                try:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    exported_files.append((file_path, len(components)))
+                except (IOError, OSError) as e:
+                    ui.messageBox(
+                        'Failed to write {} file:\n{}\n\n'
+                        'Check file permissions and path.'.format(
+                            format_label, str(e))
+                    )
+
+            if not exported_files:
                 ui.messageBox(
                     'No exportable geometry found.\n\n'
                     'The exporter looks for planar faces on the selected bodies. '
                     'Make sure your design contains extruded flat parts.\n\n'
-                    'A debug report was saved to:\n{}'.format(debug_path)
-                )
-                return
-
-            # Build output
-            if export_format == 'json':
-                content = json_builder.build_json(components, output_unit)
-            else:
-                content = svg_builder.build_svg(components, output_unit)
-
-            # Write file
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-            except (IOError, OSError) as e:
-                ui.messageBox(
-                    'Failed to write {} file:\n{}\n\n'
-                    'Check file permissions and path.'.format(format_label, str(e))
+                    'A debug report was saved to:\n{}'.format(all_debug_path)
                 )
                 return
 
             # Summary
-            total_ops = sum(
-                len(comp.operations) for comp in components
-            )
-            total_paths = sum(
-                len(op.contours) for comp in components for op in comp.operations
-            )
+            summary_lines = ['{} exported successfully!\n'.format(format_label)]
+            for fp, comp_count in exported_files:
+                summary_lines.append('  {} ({} components)'.format(
+                    os.path.basename(fp), comp_count))
+            summary_lines.append('\nDebug report: {}'.format(all_debug_path))
 
-            utils.log('Export complete: {}'.format(file_path))
-            ui.messageBox(
-                '{} exported successfully!\n\n'
-                'File: {}\n'
-                'Components: {}\n'
-                'Operations: {}\n'
-                'Paths: {}\n\n'
-                'Debug report: {}'.format(
-                    format_label, file_path, len(components), total_ops,
-                    total_paths, debug_path
-                )
-            )
+            utils.log('Export complete: {} file(s)'.format(len(exported_files)))
+            ui.messageBox('\n'.join(summary_lines))
 
         except Exception:
             app = adsk.core.Application.get()
@@ -366,8 +492,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
             # Try to mention debug report path if we got that far
             extra = ''
             try:
-                if debug_path:
-                    extra = '\n\nDebug report: {}'.format(debug_path)
+                if all_debug_path:
+                    extra = '\n\nDebug report: {}'.format(all_debug_path)
             except NameError:
                 pass
             app.userInterface.messageBox(

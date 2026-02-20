@@ -107,6 +107,14 @@ _NORMAL_TOL = 0.9999
 # Public API
 # ---------------------------------------------------------------------------
 
+def get_body_thickness(body):
+    """Return the sheet thickness of a body in cm, or None if not a sheet body."""
+    result = _classify_faces(body)
+    if result is None:
+        return None
+    return result['thickness_cm']
+
+
 def extract_from_bodies(bodies):
     """Extract geometry from a list of BRepBody objects.
 
