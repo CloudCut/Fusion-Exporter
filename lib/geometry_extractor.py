@@ -338,12 +338,12 @@ def _classify_faces(body):
     utils.log('  Machining top level: {:.4f}'.format(machining_top_level))
 
     # PROFILE FACE selection strategy:
-    # The machining-top face is the best profile candidate because its inner
-    # loops are pocket/counterbore openings (which we intentionally skip),
-    # while the bottom face's inner loops are true through-holes.
-    # However, if the machining-top side has MORE faces (split by intersecting
-    # pocket geometry), we must use the side with fewer faces for profile
-    # to get a clean outer loop.
+    # Always use the bottom face (opposite from pocket openings) for both
+    # profile and through-hole extraction. The bottom face's outer loop is
+    # the true part boundary — unaffected by pockets that intersect the
+    # part edge. Its inner loops are true through-holes.
+    # The machining-top face's outer loop can be distorted by edge pockets,
+    # and its inner loops mix pocket openings with through-holes.
     if pockets_open_toward_high:
         machining_top_candidates = high_candidates
         bottom_candidates = low_candidates
@@ -351,25 +351,14 @@ def _classify_faces(body):
         machining_top_candidates = low_candidates
         bottom_candidates = high_candidates
 
-    if len(machining_top_candidates) <= len(bottom_candidates):
-        # Machining top has fewer or equal faces — use it for profile.
-        # Through-holes come from the bottom (only true through-features).
-        profile_candidates = machining_top_candidates
-        through_hole_faces = bottom_candidates
-    else:
-        # Machining top is split — use bottom for profile (cleaner outer loop).
-        # Through-holes come from machining top (may include pocket openings).
-        profile_candidates = bottom_candidates
-        through_hole_faces = machining_top_candidates
+    profile_candidates = bottom_candidates
+    through_hole_faces = bottom_candidates
 
     profile_face = max(profile_candidates, key=lambda f: f['area'])['face']
 
-    profile_side = 'machining-top' if profile_candidates is machining_top_candidates else 'bottom'
-    utils.log('  Profile face from {} ({} faces), through-holes from {} ({} faces)'.format(
-        profile_side, len(profile_candidates),
-        'bottom' if profile_side == 'machining-top' else 'machining-top',
-        len(through_hole_faces)
-    ))
+    utils.log('  Profile & through-holes from bottom ({} faces), '
+              'machining-top has {} faces'.format(
+                  len(bottom_candidates), len(machining_top_candidates)))
 
     # Group pocket faces by level
     pocket_groups = {}
@@ -1058,15 +1047,9 @@ def dump_debug_report(bodies, file_path):
             else:
                 mt_faces = low_faces
                 bt_faces = high_faces
-            if len(mt_faces) <= len(bt_faces):
-                profile_side = 'machining-top'
-                through_hole_side = 'bottom'
-            else:
-                profile_side = 'bottom'
-                through_hole_side = 'machining-top'
-            lines.append('  Profile face from {} ({} faces), through-holes from {} ({} faces)'.format(
-                profile_side, len(mt_faces) if profile_side == 'machining-top' else len(bt_faces),
-                through_hole_side, len(bt_faces) if profile_side == 'machining-top' else len(mt_faces)))
+            lines.append('  Profile & through-holes from bottom ({} faces), '
+                         'machining-top has {} faces'.format(
+                             len(bt_faces), len(mt_faces)))
 
             lines.append('')
             lines.append('  Height-level groups: {}'.format(len(height_groups)))
