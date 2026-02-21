@@ -8,7 +8,9 @@ CMD_EXPORT_SVG_ID = 'exportSVGCommandId'
 CMD_EXPORT_SVG_NAME = 'Export SVG'
 CMD_EXPORT_SVG_DESCRIPTION = 'Export design geometry as a CNC-compatible SVG file'
 
-# Toolbar placement
-WORKSPACE_ID = 'FusionSolidEnvironment'
-TAB_ID = 'ToolsTab'
-PANEL_ID = 'SolidScriptsAddinsPanel'
+# Toolbar placements (workspace, tab, panel)
+TOOLBAR_PLACEMENTS = [
+    ('FusionSolidEnvironment', 'SolidTab',  'SolidCreatePanel'),    # Design toolbar
+    ('FusionSolidEnvironment', 'ToolsTab',  'SolidScriptsAddinsPanel'),  # Design > Utilities tab
+    ('CAMEnvironment',         'CAMActionTab', 'CAMActionPanel'),   # Manufacture toolbar
+]

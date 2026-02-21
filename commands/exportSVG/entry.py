@@ -19,7 +19,7 @@ importlib.reload(json_builder)
 
 # Globals for cleanup
 _handlers = []
-_button = None
+_buttons = []
 
 
 def start():
@@ -44,20 +44,24 @@ def start():
     cmd_def.commandCreated.add(on_created)
     _handlers.append(on_created)
 
-    # Add to toolbar
-    workspace = ui.workspaces.itemById(config.WORKSPACE_ID)
-    if workspace:
-        tab = workspace.toolbarTabs.itemById(config.TAB_ID)
-        if tab:
-            panel = tab.toolbarPanels.itemById(config.PANEL_ID)
-            if panel:
-                global _button
-                existing = panel.controls.itemById(config.CMD_EXPORT_SVG_ID)
-                if existing:
-                    existing.deleteMe()
-                _button = panel.controls.addCommand(cmd_def)
-                _button.isPromotedByDefault = False
-                _button.isPromoted = False
+    # Add to all configured toolbar locations
+    for workspace_id, tab_id, panel_id in config.TOOLBAR_PLACEMENTS:
+        workspace = ui.workspaces.itemById(workspace_id)
+        if not workspace:
+            continue
+        tab = workspace.toolbarTabs.itemById(tab_id)
+        if not tab:
+            continue
+        panel = tab.toolbarPanels.itemById(panel_id)
+        if not panel:
+            continue
+        existing = panel.controls.itemById(config.CMD_EXPORT_SVG_ID)
+        if existing:
+            existing.deleteMe()
+        button = panel.controls.addCommand(cmd_def)
+        button.isPromotedByDefault = True
+        button.isPromoted = True
+        _buttons.append(button)
 
 
 def stop():
@@ -65,10 +69,12 @@ def stop():
     app = adsk.core.Application.get()
     ui = app.userInterface
 
-    global _button
-    if _button:
-        _button.deleteMe()
-        _button = None
+    for button in _buttons:
+        try:
+            button.deleteMe()
+        except Exception:
+            pass
+    _buttons.clear()
 
     cmd_def = ui.commandDefinitions.itemById(config.CMD_EXPORT_SVG_ID)
     if cmd_def:
