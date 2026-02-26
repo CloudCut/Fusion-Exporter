@@ -16,6 +16,9 @@ _STYLE = {
     'drill':   {'fill': 'black', 'stroke': 'none'},
 }
 
+# Thin stroke width per output unit (~0.5pt hairline)
+_STROKE_WIDTH = {'mm': '0.18', 'in': '0.007'}
+
 # Spacing between bodies when laying out multiple components
 _LAYOUT_SPACING_CM = 1.0  # 1 cm gap between bodies
 _MARGIN_CM = 1.0  # 1 cm margin around the canvas
@@ -43,10 +46,14 @@ def build_svg(components, output_unit):
 
     lines = []
     lines.append('<?xml version="1.0" encoding="UTF-8"?>')
+    w_str = utils.format_depth(canvas_w, output_unit)
+    h_str = utils.format_depth(canvas_h, output_unit)
     lines.append('<svg xmlns="http://www.w3.org/2000/svg" '
-                 'width="{}{}" height="{}{}">'.format(
-                     utils.format_depth(canvas_w, output_unit), unit_suffix,
-                     utils.format_depth(canvas_h, output_unit), unit_suffix))
+                 'width="{}{}" height="{}{}" '
+                 'viewBox="0 0 {} {}">'.format(
+                     w_str, unit_suffix,
+                     h_str, unit_suffix,
+                     w_str, h_str))
 
     for i, comp in enumerate(components):
         offset_x, offset_y = layout['offsets'][i]
@@ -154,12 +161,14 @@ def _render_contour(contour, op_type, output_unit, offset_x, offset_y):
         attrs = path_converter.circle_to_element(seg, output_unit)
         cx = float(attrs['cx']) + offset_x
         cy = float(attrs['cy']) + offset_y
-        return '<circle cx="{}" cy="{}" r="{}" fill="{}" stroke="{}"/>'.format(
+        sw = _STROKE_WIDTH.get(output_unit, '0.18')
+        return '<circle cx="{}" cy="{}" r="{}" fill="{}" stroke="{}" stroke-width="{}"/>'.format(
             utils.format_coord(cx, output_unit),
             utils.format_coord(cy, output_unit),
             attrs['r'],
             fill,
-            stroke
+            stroke,
+            sw
         )
 
     # Build path with offset applied
@@ -167,7 +176,8 @@ def _render_contour(contour, op_type, output_unit, offset_x, offset_y):
     if not d:
         return None
 
-    return '<path d="{}" fill="{}" stroke="{}"/>'.format(d, fill, stroke)
+    sw = _STROKE_WIDTH.get(output_unit, '0.18')
+    return '<path d="{}" fill="{}" stroke="{}" stroke-width="{}"/>'.format(d, fill, stroke, sw)
 
 
 def _contour_to_path_d_with_offset(contour, output_unit, offset_x, offset_y):
