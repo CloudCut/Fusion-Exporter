@@ -1,6 +1,10 @@
 {
   "permissions": {
     "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
       "WebSearch",
       "WebFetch(domain:help.autodesk.com)",
       "WebFetch(domain:github.com)",
@@ -11,7 +15,11 @@
       "WebFetch(domain:ekinssolutions.com)",
       "WebFetch(domain:medium.com)",
       "Bash(chmod:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "WebFetch(domain:apps.autodesk.com)",
+      "WebFetch(domain:onshape-public.github.io)",
+      "WebFetch(domain:cad.onshape.com)",
+      "WebFetch(domain:forum.onshape.com)"
     ]
   }
 }
