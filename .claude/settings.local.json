@@ -19,7 +19,12 @@
       "WebFetch(domain:apps.autodesk.com)",
       "WebFetch(domain:onshape-public.github.io)",
       "WebFetch(domain:cad.onshape.com)",
-      "WebFetch(domain:forum.onshape.com)"
+      "WebFetch(domain:forum.onshape.com)",
+      "WebFetch(domain:ruby.sketchup.com)",
+      "WebFetch(domain:help.sketchup.com)",
+      "WebFetch(domain:sketchup.github.io)",
+      "WebFetch(domain:rubocop-sketchup.readthedocs.io)",
+      "WebFetch(domain:community.sketchucation.com)"
     ]
   }
 }
