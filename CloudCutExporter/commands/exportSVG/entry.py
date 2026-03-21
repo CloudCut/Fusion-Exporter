@@ -137,8 +137,8 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 'Output Format',
                 adsk.core.DropDownStyles.TextListDropDownStyle
             )
-            format_dropdown.listItems.add('SVG', True, '')
-            format_dropdown.listItems.add('JSON', False, '')
+            format_dropdown.listItems.add('JSON', True, '')
+            format_dropdown.listItems.add('SVG', False, '')
 
             # Filter section label
             inputs.addTextBoxCommandInput(

@@ -16,8 +16,8 @@ except Exception:
 
 # Command identifiers
 CMD_EXPORT_SVG_ID = 'cloudCutExportSVGCommandId'
-CMD_EXPORT_SVG_NAME = 'CloudCut Export v{}'.format(VERSION)
-CMD_EXPORT_SVG_DESCRIPTION = 'Export design geometry as a CNC-compatible SVG file'
+CMD_EXPORT_SVG_NAME = 'CloudCut v{}'.format(VERSION)
+CMD_EXPORT_SVG_DESCRIPTION = 'Export design geometry for CNC toolpath generation'
 
 # Toolbar placements (workspace, tab, panel)
 TOOLBAR_PLACEMENTS = [
