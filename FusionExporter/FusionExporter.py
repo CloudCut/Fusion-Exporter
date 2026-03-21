@@ -17,15 +17,39 @@ if ADDIN_DIR not in sys.path:
 import importlib
 import config
 import commands
+from lib import updater
 
 importlib.reload(config)
 importlib.reload(commands)
+importlib.reload(updater)
+
+
+def _notify_update_available(version):
+    """Called from the background thread when a new version has been staged."""
+    try:
+        app = adsk.core.Application.get()
+        if app and app.userInterface:
+            app.userInterface.messageBox(
+                'FusionExporter v{} has been downloaded.\n\n'
+                'Please restart Fusion 360 to apply the update.'.format(version)
+            )
+    except Exception:
+        pass
 
 
 def run(context):
     """Called when the add-in is started."""
     try:
+        # Apply any previously staged update before loading anything else
+        if updater.apply_staged_update():
+            # Reload modules so the new code takes effect this session
+            importlib.reload(config)
+            importlib.reload(commands)
+
         commands.start()
+
+        # Check for updates in the background
+        updater.check_for_update(_notify_update_available)
     except Exception:
         app = adsk.core.Application.get()
         if app and app.userInterface:
