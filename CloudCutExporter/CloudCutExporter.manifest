@@ -8,5 +8,5 @@
     },
     "version": "1.2.0",
     "runOnStartup": false,
-    "supportedOS": "mac"
+    "supportedOS": "windows|mac"
 }
