@@ -1,19 +1,20 @@
 #!/bin/bash
-# One-time setup: create symlink from Fusion 360 AddIns directory to this repo.
+# Setup script: install FusionExporter as symlink (dev) or copy (testing).
 
 ADDIN_DIR="$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns"
-LINK_NAME="FusionExporter"
+ADDIN_NAME="FusionExporter"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-LINK_PATH="$ADDIN_DIR/$LINK_NAME"
+SOURCE_DIR="$REPO_DIR/$ADDIN_NAME"
+INSTALL_PATH="$ADDIN_DIR/$ADDIN_NAME"
 
-echo "Fusion Exporter — Development Setup"
-echo "===================================="
+echo "Fusion Exporter — Dev Setup"
+echo "==========================="
 echo ""
-echo "Repo:   $REPO_DIR"
-echo "Target: $LINK_PATH"
+echo "Repo source: $SOURCE_DIR"
+echo "Install to:  $INSTALL_PATH"
 echo ""
 
-# Check if AddIns directory exists
+# Check Fusion AddIns directory exists
 if [ ! -d "$ADDIN_DIR" ]; then
     echo "ERROR: Fusion 360 AddIns directory not found:"
     echo "  $ADDIN_DIR"
@@ -22,38 +23,52 @@ if [ ! -d "$ADDIN_DIR" ]; then
     exit 1
 fi
 
-# Check if symlink already exists
-if [ -L "$LINK_PATH" ]; then
-    EXISTING_TARGET="$(readlink "$LINK_PATH")"
-    if [ "$EXISTING_TARGET" = "$REPO_DIR" ]; then
-        echo "Symlink already exists and points to the correct directory."
-        echo "Nothing to do."
+# Show current state
+if [ -L "$INSTALL_PATH" ]; then
+    echo "Current install: SYMLINK -> $(readlink "$INSTALL_PATH")"
+elif [ -d "$INSTALL_PATH" ]; then
+    echo "Current install: COPY"
+else
+    echo "Current install: NONE"
+fi
+echo ""
+
+# Ask what to install
+echo "How would you like to install?"
+echo "  1) Symlink (for development — changes in repo appear instantly)"
+echo "  2) Copy (for testing — simulates what users have)"
+echo "  3) Cancel"
+echo ""
+read -p "Choose [1/2/3]: " -n 1 -r
+echo ""
+echo ""
+
+case $REPLY in
+    1)
+        MODE="symlink"
+        ;;
+    2)
+        MODE="copy"
+        ;;
+    *)
+        echo "Cancelled."
         exit 0
-    else
-        echo "WARNING: Symlink exists but points to a different location:"
-        echo "  Current:  $EXISTING_TARGET"
-        echo "  Expected: $REPO_DIR"
-        echo ""
-        read -p "Replace it? [y/N] " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm "$LINK_PATH"
-        else
-            echo "Aborted."
-            exit 1
-        fi
-    fi
-elif [ -e "$LINK_PATH" ]; then
-    echo "ERROR: $LINK_PATH exists but is not a symlink."
-    echo "Please remove it manually and run this script again."
-    exit 1
+        ;;
+esac
+
+# Remove existing install
+if [ -L "$INSTALL_PATH" ] || [ -d "$INSTALL_PATH" ]; then
+    rm -rf "$INSTALL_PATH"
+    echo "Removed existing install."
 fi
 
-ln -s "$REPO_DIR" "$LINK_PATH"
-echo "Symlink created successfully."
+if [ "$MODE" = "symlink" ]; then
+    ln -s "$SOURCE_DIR" "$INSTALL_PATH"
+    echo "Symlink created: $INSTALL_PATH -> $SOURCE_DIR"
+else
+    cp -R "$SOURCE_DIR" "$INSTALL_PATH"
+    echo "Copied $ADDIN_NAME to AddIns directory."
+fi
+
 echo ""
-echo "Next steps:"
-echo "  1. Open Fusion 360"
-echo "  2. Press Shift+S → Scripts and Add-Ins"
-echo "  3. Switch to the Add-Ins tab"
-echo "  4. Find 'FusionExporter' and click Run"
+echo "Done. Restart the add-in in Fusion (or restart Fusion) to pick up changes."
