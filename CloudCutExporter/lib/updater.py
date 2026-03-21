@@ -19,7 +19,7 @@ GITHUB_REPO = 'Fusion-Exporter'
 
 ADDIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGING_DIR = os.path.join(ADDIN_DIR, '_update_staging')
-MANIFEST_FILE = os.path.join(ADDIN_DIR, 'FusionExporter.manifest')
+MANIFEST_FILE = os.path.join(ADDIN_DIR, 'CloudCutExporter.manifest')
 
 
 def _read_local_version():
@@ -50,7 +50,7 @@ def _fetch_latest_release():
         GITHUB_OWNER, GITHUB_REPO)
     req = Request(url)
     req.add_header('Accept', 'application/vnd.github.v3+json')
-    req.add_header('User-Agent', 'FusionExporter-Updater')
+    req.add_header('User-Agent', 'CloudCutExporter-Updater')
 
     try:
         resp = urlopen(req, timeout=10)
@@ -67,7 +67,7 @@ def _fetch_latest_release():
 def _download_and_stage(zipball_url):
     """Download a release zipball and extract it to the staging directory."""
     req = Request(zipball_url)
-    req.add_header('User-Agent', 'FusionExporter-Updater')
+    req.add_header('User-Agent', 'CloudCutExporter-Updater')
 
     resp = urlopen(req, timeout=60)
     zip_data = resp.read()
@@ -83,7 +83,7 @@ def _download_and_stage(zipball_url):
             shutil.rmtree(STAGING_DIR)
 
         # Extract — GitHub zipballs have a top-level directory like "owner-repo-sha/"
-        # The add-in lives in the "FusionExporter/" subfolder of the repo,
+        # The add-in lives in the "CloudCutExporter/" subfolder of the repo,
         # so we only extract that subfolder's contents.
         with zipfile.ZipFile(tmp_path, 'r') as zf:
             names = zf.namelist()
@@ -95,12 +95,12 @@ def _download_and_stage(zipball_url):
                     top_prefix = first.split('/')[0] + '/'
 
             # The add-in subfolder within the repo
-            addin_prefix = top_prefix + 'FusionExporter/'
+            addin_prefix = top_prefix + 'CloudCutExporter/'
 
             os.makedirs(STAGING_DIR, exist_ok=True)
 
             for member in names:
-                # Only extract files inside the FusionExporter/ subfolder
+                # Only extract files inside the CloudCutExporter/ subfolder
                 if not member.startswith(addin_prefix):
                     continue
 

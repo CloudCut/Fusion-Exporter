@@ -8,7 +8,7 @@ def log(msg):
     """Write a message to Fusion's Text Commands palette."""
     app = adsk.core.Application.get()
     if app:
-        app.log('[FusionExporter] {}'.format(msg))
+        app.log('[CloudCutExporter] {}'.format(msg))
 
 
 def cm_to_mm(val):

@@ -1,4 +1,4 @@
-"""FusionExporter — Fusion 360 Add-in Entry Point.
+"""CloudCut Exporter — Fusion 360 Add-in Entry Point.
 
 Exports design geometry as SVG files for CNC toolpath generation.
 """
@@ -25,7 +25,7 @@ importlib.reload(commands)
 importlib.reload(updater)
 
 # Custom event for thread-safe UI notification
-_UPDATE_EVENT_ID = 'FusionExporterUpdateEvent'
+_UPDATE_EVENT_ID = 'CloudCutExporterUpdateEvent'
 _custom_event = None
 _update_handler = None
 
@@ -42,7 +42,7 @@ class _UpdateEventHandler(adsk.core.CustomEventHandler):
             app = adsk.core.Application.get()
             if app and app.userInterface:
                 app.userInterface.messageBox(
-                    'FusionExporter v{} has been downloaded.\n\n'
+                    'CloudCut Exporter v{} has been downloaded.\n\n'
                     'Please restart Fusion 360 to apply the update.'.format(version)
                 )
         except Exception:
@@ -83,7 +83,7 @@ def run(context):
         app = adsk.core.Application.get()
         if app and app.userInterface:
             app.userInterface.messageBox(
-                'Failed to start FusionExporter:\n{}'.format(traceback.format_exc())
+                'Failed to start CloudCut Exporter:\n{}'.format(traceback.format_exc())
             )
 
 
@@ -103,5 +103,5 @@ def stop(context):
         app = adsk.core.Application.get()
         if app and app.userInterface:
             app.userInterface.messageBox(
-                'Failed to stop FusionExporter:\n{}'.format(traceback.format_exc())
+                'Failed to stop CloudCut Exporter:\n{}'.format(traceback.format_exc())
             )

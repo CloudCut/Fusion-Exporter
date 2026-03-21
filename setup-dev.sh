@@ -1,13 +1,13 @@
 #!/bin/bash
-# Setup script: install FusionExporter as symlink (dev) or copy (testing).
+# Setup script: install CloudCutExporter as symlink (dev) or copy (testing).
 
 ADDIN_DIR="$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns"
-ADDIN_NAME="FusionExporter"
+ADDIN_NAME="CloudCutExporter"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_DIR="$REPO_DIR/$ADDIN_NAME"
 INSTALL_PATH="$ADDIN_DIR/$ADDIN_NAME"
 
-echo "Fusion Exporter — Dev Setup"
+echo "CloudCut Exporter — Dev Setup"
 echo "==========================="
 echo ""
 echo "Repo source: $SOURCE_DIR"
