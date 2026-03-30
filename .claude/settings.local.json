@@ -24,7 +24,8 @@
       "WebFetch(domain:help.sketchup.com)",
       "WebFetch(domain:sketchup.github.io)",
       "WebFetch(domain:rubocop-sketchup.readthedocs.io)",
-      "WebFetch(domain:community.sketchucation.com)"
+      "WebFetch(domain:community.sketchucation.com)",
+      "WebFetch(domain:127.0.0.1)"
     ]
   }
 }

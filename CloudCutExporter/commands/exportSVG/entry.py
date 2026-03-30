@@ -243,7 +243,7 @@ def _rebuild_thickness_dropdown(thickness_dropdown, body_input):
         thickness_dropdown.listItems.add('All', True, '')
     for t_cm in sorted(thicknesses):
         if output_unit == 'mm':
-            label = '{:.2f} mm'.format(t_cm * 10)
+            label = '{:.3f} mm'.format(t_cm * 10)
         else:
             label = '{:.4f} in'.format(t_cm / 2.54)
         thickness_dropdown.listItems.add(label, True, '')
@@ -380,7 +380,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                     t = 0.0
                 t_rounded = round(t, 4)
                 if output_unit == 'mm':
-                    label = '{:.2f} mm'.format(t_rounded * 10)
+                    label = '{:.3f} mm'.format(t_rounded * 10)
                 else:
                     label = '{:.4f} in'.format(t_rounded / 2.54)
                 thickness_groups.setdefault(label, []).append(body)

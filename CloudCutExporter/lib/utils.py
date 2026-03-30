@@ -32,25 +32,25 @@ def cm_to_unit(val, unit):
 def format_coord(val, unit):
     """Format a coordinate value with appropriate precision.
 
-    mm: 4 decimal places (0.001mm precision)
-    in: 6 decimal places (0.000001" precision)
+    mm: 3 decimal places (0.001mm precision)
+    in: 4 decimal places (0.0001" precision)
     """
     if unit == 'mm':
-        return '{:.4f}'.format(val)
+        return '{:.3f}'.format(val)
     else:
-        return '{:.6f}'.format(val)
+        return '{:.4f}'.format(val)
 
 
 def format_depth(val, unit):
     """Format a cut depth value. Uses fewer decimals for readability."""
     if unit == 'mm':
         # Remove trailing zeros but keep at least one decimal
-        formatted = '{:.4f}'.format(val).rstrip('0')
+        formatted = '{:.3f}'.format(val).rstrip('0')
         if formatted.endswith('.'):
             formatted += '0'
         return formatted
     else:
-        formatted = '{:.6f}'.format(val).rstrip('0')
+        formatted = '{:.4f}'.format(val).rstrip('0')
         if formatted.endswith('.'):
             formatted += '0'
         return formatted

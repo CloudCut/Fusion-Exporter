@@ -6,6 +6,7 @@ but outputs a machine-readable JSON structure instead of SVG markup.
 
 import json
 
+import config
 from . import utils
 from .geometry_extractor import (
     ExportComponent, ExportOperation, ExportContour,
@@ -39,6 +40,7 @@ def build_json(components, output_unit, stock_thickness_cm=0):
     thickness_in_units = utils.cm_to_unit(stock_thickness_cm, output_unit)
 
     doc = {
+        'exporterVersion': config.VERSION,
         'units': output_unit,
         'stockThickness': _num(thickness_in_units, output_unit),
         'width': _num(canvas_w, output_unit),
@@ -251,6 +253,6 @@ def _convert_and_offset(pt_cm, output_unit, offset_x, offset_y):
 def _num(val, output_unit):
     """Round a numeric value to appropriate precision for JSON output."""
     if output_unit == 'mm':
-        return round(val, 4)
+        return round(val, 3)
     else:
-        return round(val, 6)
+        return round(val, 4)
