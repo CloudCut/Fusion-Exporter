@@ -6,7 +6,7 @@
     "description": {
         "": "Export design geometry as SVG files for CNC toolpath generation."
     },
-    "version": "1.2.2",
+    "version": "1.2.3",
     "runOnStartup": false,
     "supportedOS": "windows|mac"
 }
