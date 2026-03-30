@@ -19,7 +19,7 @@ _LAYOUT_SPACING_CM = 1.0  # 1 cm gap between bodies
 _MARGIN_CM = 1.0  # 1 cm margin around the canvas
 
 
-def build_json(components, output_unit):
+def build_json(components, output_unit, stock_thickness_cm=0):
     """Build a JSON string from ExportComponents.
 
     Handles multi-body layout by arranging components side-by-side
@@ -28,6 +28,7 @@ def build_json(components, output_unit):
     Args:
         components: list of ExportComponent (coordinates in cm)
         output_unit: 'mm' or 'in'
+        stock_thickness_cm: stock thickness in cm for all components in this file
 
     Returns:
         str: JSON document string
@@ -35,8 +36,11 @@ def build_json(components, output_unit):
     layout = _compute_layout(components, output_unit)
     canvas_w, canvas_h = layout['canvas_size']
 
+    thickness_in_units = utils.cm_to_unit(stock_thickness_cm, output_unit)
+
     doc = {
         'units': output_unit,
+        'stockThickness': _num(thickness_in_units, output_unit),
         'width': _num(canvas_w, output_unit),
         'height': _num(canvas_h, output_unit),
         'components': [],

@@ -455,11 +455,14 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                               'skipping.'.format(label))
                     continue
 
+                # Determine stock thickness from the first body in the group
+                group_thickness_cm = geometry_extractor.get_body_thickness(group_bodies[0]) or 0
+
                 # Build output
                 if export_format == 'json':
-                    content = json_builder.build_json(components, output_unit)
+                    content = json_builder.build_json(components, output_unit, group_thickness_cm)
                 else:
-                    content = svg_builder.build_svg(components, output_unit)
+                    content = svg_builder.build_svg(components, output_unit, group_thickness_cm)
 
                 # Write file
                 try:

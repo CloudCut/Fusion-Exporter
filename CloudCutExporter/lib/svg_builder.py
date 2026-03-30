@@ -24,7 +24,7 @@ _LAYOUT_SPACING_CM = 1.0  # 1 cm gap between bodies
 _MARGIN_CM = 1.0  # 1 cm margin around the canvas
 
 
-def build_svg(components, output_unit):
+def build_svg(components, output_unit, stock_thickness_cm=0):
     """Build a complete SVG document string from ExportComponents.
 
     Handles multi-body layout by arranging components side-by-side.
@@ -32,6 +32,7 @@ def build_svg(components, output_unit):
     Args:
         components: list of ExportComponent (coordinates in cm)
         output_unit: 'mm' or 'in'
+        stock_thickness_cm: stock thickness in cm for all components in this file
 
     Returns:
         str: complete SVG document with XML declaration
@@ -43,6 +44,8 @@ def build_svg(components, output_unit):
     canvas_w, canvas_h = layout['canvas_size']
 
     unit_suffix = output_unit
+    thickness_in_units = utils.cm_to_unit(stock_thickness_cm, output_unit)
+    thickness_str = utils.format_depth(thickness_in_units, output_unit)
 
     lines = []
     lines.append('<?xml version="1.0" encoding="UTF-8"?>')
@@ -50,10 +53,12 @@ def build_svg(components, output_unit):
     h_str = utils.format_depth(canvas_h, output_unit)
     lines.append('<svg xmlns="http://www.w3.org/2000/svg" '
                  'width="{}{}" height="{}{}" '
-                 'viewBox="0 0 {} {}">'.format(
+                 'viewBox="0 0 {} {}" '
+                 'data-stock-thickness="{}">'.format(
                      w_str, unit_suffix,
                      h_str, unit_suffix,
-                     w_str, h_str))
+                     w_str, h_str,
+                     thickness_str))
 
     for i, comp in enumerate(components):
         offset_x, offset_y = layout['offsets'][i]
