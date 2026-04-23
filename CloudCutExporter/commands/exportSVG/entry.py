@@ -5,6 +5,7 @@ import adsk.fusion
 import os
 import traceback
 import importlib
+import webbrowser
 
 import config
 from lib import utils, geometry_extractor, path_converter, svg_builder, json_builder
@@ -491,9 +492,17 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                 summary_lines.append('  {} ({} components)'.format(
                     os.path.basename(fp), comp_count))
             summary_lines.append('\nDebug report: {}'.format(all_debug_path))
+            summary_lines.append('\nOpen CloudCut to continue?')
 
             utils.log('Export complete: {} file(s)'.format(len(exported_files)))
-            ui.messageBox('\n'.join(summary_lines))
+            result = ui.messageBox(
+                '\n'.join(summary_lines),
+                'Export Complete',
+                adsk.core.MessageBoxButtonTypes.OKCancelButtonType,
+                adsk.core.MessageBoxIconTypes.QuestionIconType
+            )
+            if result == adsk.core.DialogResults.DialogOK:
+                webbrowser.open('https://app.cloudcut.cam')
 
         except Exception:
             app = adsk.core.Application.get()
