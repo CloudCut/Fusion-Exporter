@@ -67,9 +67,27 @@ def build_json(components, output_unit, stock_thickness_cm=0):
                 'circles': [],
             }
 
+            # Islands (non-outer pocket contours) are marked by index into
+            # paths/circles. Additive only: consumers that predate these
+            # fields ignore them and fall back to containment detection.
+            island_path_indices = []
+            island_circle_indices = []
+
             for contour in op.contours:
+                n_paths = len(op_obj['paths'])
+                n_circles = len(op_obj['circles'])
                 _add_contour(op_obj, contour, op.op_type,
                              output_unit, offset_x, offset_y)
+                if op.op_type == 'pocket' and not contour.is_outer:
+                    if len(op_obj['paths']) > n_paths:
+                        island_path_indices.append(n_paths)
+                    elif len(op_obj['circles']) > n_circles:
+                        island_circle_indices.append(n_circles)
+
+            if island_path_indices:
+                op_obj['islandIndices'] = island_path_indices
+            if island_circle_indices:
+                op_obj['islandCircleIndices'] = island_circle_indices
 
             comp_obj['operations'].append(op_obj)
 
