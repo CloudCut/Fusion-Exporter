@@ -14,6 +14,10 @@ try:
 except Exception:
     VERSION = '0.0.0'
 
+# CloudCut API that "Send to CloudCut" posts exports to. Set the
+# CLOUDCUT_API_URL environment variable to test against a local workshop.
+CLOUDCUT_API_URL = os.environ.get('CLOUDCUT_API_URL', 'https://shop.cloudcut.cam').rstrip('/')
+
 # Command identifiers
 CMD_EXPORT_SVG_ID = 'cloudCutExportSVGCommandId'
 CMD_EXPORT_SVG_NAME = 'CloudCut v{}'.format(VERSION)

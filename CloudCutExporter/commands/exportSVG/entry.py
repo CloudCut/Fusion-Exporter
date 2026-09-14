@@ -2,13 +2,14 @@
 
 import adsk.core
 import adsk.fusion
+import json
 import os
 import traceback
 import importlib
 import webbrowser
 
 import config
-from lib import utils, geometry_extractor, path_converter, svg_builder, json_builder
+from lib import utils, geometry_extractor, path_converter, svg_builder, json_builder, handoff
 
 # Reload order matters: dependencies first
 importlib.reload(config)
@@ -17,6 +18,7 @@ importlib.reload(geometry_extractor)
 importlib.reload(path_converter)
 importlib.reload(svg_builder)
 importlib.reload(json_builder)
+importlib.reload(handoff)
 
 # Globals for cleanup
 _handlers = []
@@ -132,14 +134,15 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             units_dropdown.listItems.add('Millimeters (mm)', is_metric, '')
             units_dropdown.listItems.add('Inches (in)', not is_metric, '')
 
-            # Output format dropdown
+            # Output dropdown: send straight to CloudCut, or save files
             format_dropdown = inputs.addDropDownCommandInput(
                 'outputFormat',
-                'Output Format',
+                'Output',
                 adsk.core.DropDownStyles.TextListDropDownStyle
             )
-            format_dropdown.listItems.add('JSON', True, '')
-            format_dropdown.listItems.add('SVG', False, '')
+            format_dropdown.listItems.add(OUTPUT_SEND, True, '')
+            format_dropdown.listItems.add(OUTPUT_JSON, False, '')
+            format_dropdown.listItems.add(OUTPUT_SVG, False, '')
 
             # Filter section label
             inputs.addTextBoxCommandInput(
@@ -320,6 +323,162 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
             args.areInputsValid = False
 
 
+# Output choices. Fusion command dialogs have a single OK button, so sending
+# to CloudCut vs saving files is picked in the Output dropdown.
+OUTPUT_SEND = 'Send to CloudCut'
+OUTPUT_JSON = 'Save JSON file'
+OUTPUT_SVG = 'Save SVG file'
+
+_NO_GEOMETRY_MSG = (
+    'No exportable geometry found.\n\n'
+    'The exporter looks for planar faces on the selected bodies. '
+    'Make sure your design contains extruded flat parts.'
+)
+
+
+def _thickness_tag(label):
+    """'0.7500 in' -> '0.7500in', as used in file and job names."""
+    return label.replace(' ', '')
+
+
+def _build_groups(export_groups, output_unit, export_format):
+    """Build one document per thickness group.
+
+    Returns [(label, content, component_count)] for the groups that have
+    exportable geometry, in label order.
+    """
+    built = []
+    for label, group_bodies in sorted(export_groups.items()):
+        utils.log('Building {} for thickness {} ({} bodies, {})...'.format(
+            export_format.upper(), label, len(group_bodies), output_unit))
+
+        components = geometry_extractor.extract_from_bodies(group_bodies)
+        if not components:
+            utils.log('No exportable geometry for thickness {}, skipping.'.format(label))
+            continue
+
+        # Stock thickness comes from the first body in the group
+        group_thickness_cm = geometry_extractor.get_body_thickness(group_bodies[0]) or 0
+
+        if export_format == 'json':
+            content = json_builder.build_json(components, output_unit, group_thickness_cm)
+        else:
+            content = svg_builder.build_svg(components, output_unit, group_thickness_cm)
+        built.append((label, content, len(components)))
+    return built
+
+
+def _send_export(ui, doc_name, export_groups, output_unit):
+    """Send to CloudCut: POST every thickness group as one handoff, then open
+    the shop link in the browser, where the signed-in user claims the jobs."""
+    built = _build_groups(export_groups, output_unit, 'json')
+    if not built:
+        ui.messageBox(_NO_GEOMETRY_MSG)
+        return
+
+    files = [
+        {'name': '{}_{}'.format(doc_name, _thickness_tag(label)), 'content': json.loads(content)}
+        for label, content, _count in built
+    ]
+
+    progress = ui.createProgressDialog()
+    progress.isCancelButtonShown = False
+    progress.show('CloudCut', 'Sending to CloudCut...', 0, 1, 0)
+    adsk.doEvents()
+    url, error = None, None
+    try:
+        url = handoff.send_handoff(files)
+    except handoff.SendError as e:
+        error = e
+    finally:
+        progress.hide()
+
+    if error:
+        utils.log('Send to CloudCut failed: {}'.format(error))
+        choice = ui.messageBox(
+            '{}\n\nSave the export as JSON files instead?'.format(error),
+            'Send to CloudCut',
+            adsk.core.MessageBoxButtonTypes.YesNoButtonType,
+            adsk.core.MessageBoxIconTypes.WarningIconType
+        )
+        if choice == adsk.core.DialogResults.DialogYes:
+            _save_export(ui, doc_name, export_groups, output_unit, 'json', built)
+        return
+
+    utils.log('Sent {} file(s) to CloudCut: {}'.format(len(files), url))
+    webbrowser.open(url)
+
+
+def _save_export(ui, doc_name, export_groups, output_unit, export_format, built=None):
+    """Save one file per thickness group under a user-picked base name."""
+    file_ext = '.' + export_format
+    format_label = export_format.upper()
+
+    # Show file save dialog (user picks base filename)
+    file_dialog = ui.createFileDialog()
+    file_dialog.isMultiSelectEnabled = False
+    file_dialog.title = 'Save {} File'.format(format_label)
+    file_dialog.filter = '{} Files (*{})'.format(format_label, file_ext)
+    file_dialog.initialFilename = doc_name + file_ext
+
+    if file_dialog.showSave() != adsk.core.DialogResults.DialogOK:
+        return
+
+    base_path = file_dialog.filename
+    if base_path.lower().endswith(file_ext):
+        base_path = base_path[:-len(file_ext)]
+
+    # Debug report covers every body being exported
+    all_debug_path = base_path + '_debug.txt'
+    try:
+        all_bodies = [b for group in export_groups.values() for b in group]
+        geometry_extractor.dump_debug_report(all_bodies, all_debug_path)
+    except Exception:
+        utils.log('Warning: debug report failed: {}'.format(traceback.format_exc()))
+
+    if built is None:
+        built = _build_groups(export_groups, output_unit, export_format)
+    if not built:
+        ui.messageBox('{}\n\nA debug report was saved to:\n{}'.format(
+            _NO_GEOMETRY_MSG, all_debug_path))
+        return
+
+    # One file per thickness: base_0.75in.json or base_19.05mm.json
+    exported_files = []
+    for label, content, comp_count in built:
+        file_path = '{}_{}{}'.format(base_path, _thickness_tag(label), file_ext)
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            exported_files.append((file_path, comp_count))
+        except (IOError, OSError) as e:
+            ui.messageBox(
+                'Failed to write {} file:\n{}\n\n'
+                'Check file permissions and path.'.format(format_label, str(e))
+            )
+
+    if not exported_files:
+        return
+
+    # Summary
+    summary_lines = ['{} exported successfully!\n'.format(format_label)]
+    for fp, comp_count in exported_files:
+        summary_lines.append('  {} ({} components)'.format(
+            os.path.basename(fp), comp_count))
+    summary_lines.append('\nDebug report: {}'.format(all_debug_path))
+    summary_lines.append('\nOpen CloudCut to continue?')
+
+    utils.log('Export complete: {} file(s)'.format(len(exported_files)))
+    result = ui.messageBox(
+        '\n'.join(summary_lines),
+        'Export Complete',
+        adsk.core.MessageBoxButtonTypes.OKCancelButtonType,
+        adsk.core.MessageBoxIconTypes.QuestionIconType
+    )
+    if result == adsk.core.DialogResults.DialogOK:
+        webbrowser.open('https://app.cloudcut.cam')
+
+
 class ExecuteHandler(adsk.core.CommandEventHandler):
     def __init__(self):
         super().__init__()
@@ -396,113 +555,14 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                 ui.messageBox('No bodies match the selected thicknesses.')
                 return
 
-            # Determine output format
-            export_format = 'json' if format_dropdown.selectedItem.name == 'JSON' else 'svg'
-            file_ext = '.' + export_format
-            format_label = export_format.upper()
-
-            # Show file save dialog (user picks base filename)
-            file_dialog = ui.createFileDialog()
-            file_dialog.isMultiSelectEnabled = False
-            if export_format == 'json':
-                file_dialog.title = 'Save JSON File'
-                file_dialog.filter = 'JSON Files (*.json)'
-            else:
-                file_dialog.title = 'Save SVG File'
-                file_dialog.filter = 'SVG Files (*.svg)'
-
             doc_name = app.activeDocument.name if app.activeDocument else 'export'
-            file_dialog.initialFilename = doc_name + file_ext
+            output_choice = format_dropdown.selectedItem.name
 
-            result = file_dialog.showSave()
-            if result != adsk.core.DialogResults.DialogOK:
-                return
-
-            base_path = file_dialog.filename
-            if base_path.lower().endswith(file_ext):
-                base_path = base_path[:-len(file_ext)]
-
-            # Export one file per thickness group
-            exported_files = []
-            all_debug_path = base_path + '_debug.txt'
-
-            for label, group_bodies in sorted(export_groups.items()):
-                # Build filename: base_0.75in.svg or base_19.05mm.svg
-                thickness_tag = label.replace(' ', '')
-                file_path = '{}_{}{}'.format(base_path, thickness_tag, file_ext)
-
-                utils.log('Starting {} export for thickness {}...'.format(
-                    format_label, label))
-                utils.log('Bodies: {}'.format(len(group_bodies)))
-                utils.log('Output unit: {}'.format(output_unit))
-
-                # Write debug report (once, for all bodies)
-                if not exported_files:
-                    try:
-                        all_bodies = []
-                        for g in export_groups.values():
-                            all_bodies.extend(g)
-                        geometry_extractor.dump_debug_report(
-                            all_bodies, all_debug_path)
-                    except Exception:
-                        utils.log('Warning: debug report failed: {}'.format(
-                            traceback.format_exc()))
-
-                # Extract geometry
-                components = geometry_extractor.extract_from_bodies(group_bodies)
-
-                if not components:
-                    utils.log('No exportable geometry for thickness {}, '
-                              'skipping.'.format(label))
-                    continue
-
-                # Determine stock thickness from the first body in the group
-                group_thickness_cm = geometry_extractor.get_body_thickness(group_bodies[0]) or 0
-
-                # Build output
-                if export_format == 'json':
-                    content = json_builder.build_json(components, output_unit, group_thickness_cm)
-                else:
-                    content = svg_builder.build_svg(components, output_unit, group_thickness_cm)
-
-                # Write file
-                try:
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    exported_files.append((file_path, len(components)))
-                except (IOError, OSError) as e:
-                    ui.messageBox(
-                        'Failed to write {} file:\n{}\n\n'
-                        'Check file permissions and path.'.format(
-                            format_label, str(e))
-                    )
-
-            if not exported_files:
-                ui.messageBox(
-                    'No exportable geometry found.\n\n'
-                    'The exporter looks for planar faces on the selected bodies. '
-                    'Make sure your design contains extruded flat parts.\n\n'
-                    'A debug report was saved to:\n{}'.format(all_debug_path)
-                )
-                return
-
-            # Summary
-            summary_lines = ['{} exported successfully!\n'.format(format_label)]
-            for fp, comp_count in exported_files:
-                summary_lines.append('  {} ({} components)'.format(
-                    os.path.basename(fp), comp_count))
-            summary_lines.append('\nDebug report: {}'.format(all_debug_path))
-            summary_lines.append('\nOpen CloudCut to continue?')
-
-            utils.log('Export complete: {} file(s)'.format(len(exported_files)))
-            result = ui.messageBox(
-                '\n'.join(summary_lines),
-                'Export Complete',
-                adsk.core.MessageBoxButtonTypes.OKCancelButtonType,
-                adsk.core.MessageBoxIconTypes.QuestionIconType
-            )
-            if result == adsk.core.DialogResults.DialogOK:
-                webbrowser.open('https://app.cloudcut.cam')
+            if output_choice == OUTPUT_SEND:
+                _send_export(ui, doc_name, export_groups, output_unit)
+            else:
+                export_format = 'svg' if output_choice == OUTPUT_SVG else 'json'
+                _save_export(ui, doc_name, export_groups, output_unit, export_format)
 
         except Exception:
             app = adsk.core.Application.get()
