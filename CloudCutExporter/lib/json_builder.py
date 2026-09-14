@@ -40,6 +40,7 @@ def build_json(components, output_unit, stock_thickness_cm=0):
     thickness_in_units = utils.cm_to_unit(stock_thickness_cm, output_unit)
 
     doc = {
+        'source': {'app': 'fusion', 'version': config.VERSION},
         'exporterVersion': config.VERSION,
         'units': output_unit,
         'stockThickness': _num(thickness_in_units, output_unit),
