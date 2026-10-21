@@ -109,6 +109,11 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             default_length_unit = units_mgr.defaultLengthUnits
             is_metric = 'mm' in default_length_unit or 'cm' in default_length_unit or 'meter' in default_length_unit
 
+            # Export name: used for saved filenames and CloudCut job names
+            doc_name = app.activeDocument.name if app.activeDocument else 'export'
+            name_input = inputs.addStringValueInput('exportName', 'Name', doc_name)
+            name_input.tooltip = 'Base name for exported files / CloudCut jobs'
+
             # Body selection input
             body_input = inputs.addSelectionInput(
                 'bodySelection',
@@ -316,8 +321,13 @@ class ValidateInputsHandler(adsk.core.ValidateInputsEventHandler):
             inputs = args.inputs
             body_input = inputs.itemById('bodySelection')
 
-            # Must have at least one body selected
-            args.areInputsValid = body_input.selectionCount >= 1
+            name_input = inputs.itemById('exportName')
+
+            # Must have at least one body selected and a non-empty name
+            args.areInputsValid = (
+                body_input.selectionCount >= 1
+                and bool(_clean_export_name(name_input.value))
+            )
 
         except Exception:
             args.areInputsValid = False
@@ -334,6 +344,15 @@ _NO_GEOMETRY_MSG = (
     'The exporter looks for planar faces on the selected bodies. '
     'Make sure your design contains extruded flat parts.'
 )
+
+
+_INVALID_NAME_CHARS = '<>:"/\\|?*'
+
+
+def _clean_export_name(name):
+    """Strip characters that aren't allowed in filenames on macOS/Windows."""
+    cleaned = ''.join('_' if c in _INVALID_NAME_CHARS else c for c in name)
+    return cleaned.strip().rstrip('.')
 
 
 def _thickness_tag(label):
@@ -555,7 +574,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
                 ui.messageBox('No bodies match the selected thicknesses.')
                 return
 
-            doc_name = app.activeDocument.name if app.activeDocument else 'export'
+            doc_name = _clean_export_name(inputs.itemById('exportName').value) or 'export'
             output_choice = format_dropdown.selectedItem.name
 
             if output_choice == OUTPUT_SEND:
