@@ -1,25 +1,27 @@
-"""Auto-updater — checks GitHub releases and stages updates for next restart."""
+"""Auto-updater (Direct build only) — checks GitHub releases and stages updates for next restart.
+
+Each release has the built Direct zip attached (CloudCut-direct-<ver>.zip, made
+by build.sh). The store build never ships this file.
+"""
 
 import json
 import os
 import shutil
-import tempfile
 import threading
-import zipfile
 
-try:
-    from urllib.request import urlopen, Request
-    from urllib.error import URLError
-except ImportError:
-    from urllib2 import urlopen, Request, URLError
+from .. import config
 
 # GitHub repository to check for releases
 GITHUB_OWNER = 'CloudCut'
 GITHUB_REPO = 'Fusion-Exporter'
 
-ADDIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Release asset to download: dist/CloudCut-direct-<ver>.zip from build.sh
+ASSET_PREFIX = 'CloudCut-direct-'
+
+ADDIN_DIR = config.ADDIN_DIR
 STAGING_DIR = os.path.join(ADDIN_DIR, '_update_staging')
-MANIFEST_FILE = os.path.join(ADDIN_DIR, 'CloudCutExporter.manifest')
+MANIFEST_FILE = os.path.join(ADDIN_DIR, config.ADDIN_NAME + '.manifest')
+USER_AGENT = 'CloudCutExporter-Updater'
 
 
 def _read_local_version():
@@ -45,29 +47,42 @@ def _parse_version(version_str):
 
 
 def _fetch_latest_release():
-    """Query the GitHub API for the latest release. Returns (tag, zipball_url) or None."""
+    """Query the GitHub API for the latest release. Returns (tag, asset_url) or None.
+
+    Releases without a Direct zip attached are skipped (no update).
+    """
+    # Imported here, on the background thread, to keep add-in startup fast.
+    from urllib.request import urlopen, Request
+
     url = 'https://api.github.com/repos/{}/{}/releases/latest'.format(
         GITHUB_OWNER, GITHUB_REPO)
     req = Request(url)
     req.add_header('Accept', 'application/vnd.github.v3+json')
-    req.add_header('User-Agent', 'CloudCutExporter-Updater')
+    req.add_header('User-Agent', USER_AGENT)
 
     try:
         resp = urlopen(req, timeout=10)
         data = json.loads(resp.read().decode('utf-8'))
         tag = data.get('tag_name', '')
-        zipball_url = data.get('zipball_url', '')
-        if tag and zipball_url:
-            return tag, zipball_url
+        for asset in data.get('assets', []):
+            name = asset.get('name', '')
+            if name.startswith(ASSET_PREFIX) and name.endswith('.zip'):
+                asset_url = asset.get('browser_download_url', '')
+                if tag and asset_url:
+                    return tag, asset_url
     except Exception:
         pass
     return None
 
 
-def _download_and_stage(zipball_url):
-    """Download a release zipball and extract it to the staging directory."""
-    req = Request(zipball_url)
-    req.add_header('User-Agent', 'CloudCutExporter-Updater')
+def _download_and_stage(asset_url):
+    """Download the Direct zip and extract the add-in folder to the staging directory."""
+    import tempfile
+    import zipfile
+    from urllib.request import urlopen, Request
+
+    req = Request(asset_url)
+    req.add_header('User-Agent', USER_AGENT)
 
     resp = urlopen(req, timeout=60)
     zip_data = resp.read()
@@ -82,33 +97,24 @@ def _download_and_stage(zipball_url):
         if os.path.exists(STAGING_DIR):
             shutil.rmtree(STAGING_DIR)
 
-        # Extract — GitHub zipballs have a top-level directory like "owner-repo-sha/"
-        # The add-in lives in the "CloudCutExporter/" subfolder of the repo,
-        # so we only extract that subfolder's contents.
+        # The zip holds one top-level folder, the add-in itself
+        # ("CloudCutExporter/..."); extract that folder's contents.
+        staging_root = os.path.realpath(STAGING_DIR)
         with zipfile.ZipFile(tmp_path, 'r') as zf:
-            names = zf.namelist()
-            # Find the GitHub top-level prefix (e.g. "CloudCut-Fusion-Exporter-abc1234/")
-            top_prefix = ''
-            if names:
-                first = names[0]
-                if '/' in first:
-                    top_prefix = first.split('/')[0] + '/'
-
-            # The add-in subfolder within the repo
-            addin_prefix = top_prefix + 'CloudCutExporter/'
-
+            prefix = config.ADDIN_NAME + '/'
             os.makedirs(STAGING_DIR, exist_ok=True)
 
-            for member in names:
-                # Only extract files inside the CloudCutExporter/ subfolder
-                if not member.startswith(addin_prefix):
+            for member in zf.namelist():
+                if not member.startswith(prefix):
                     continue
 
-                relative = member[len(addin_prefix):]
+                relative = member[len(prefix):]
                 if not relative:
                     continue
 
-                dest = os.path.join(STAGING_DIR, relative)
+                dest = os.path.realpath(os.path.join(STAGING_DIR, relative))
+                if not dest.startswith(staging_root + os.sep):
+                    continue  # never write outside the staging folder
                 if member.endswith('/'):
                     os.makedirs(dest, exist_ok=True)
                 else:
@@ -116,6 +122,10 @@ def _download_and_stage(zipball_url):
                     with zf.open(member) as src, open(dest, 'wb') as dst:
                         dst.write(src.read())
 
+        # Only stage a complete add-in
+        if not os.path.isfile(os.path.join(STAGING_DIR, config.ADDIN_NAME + '.manifest')):
+            shutil.rmtree(STAGING_DIR)
+            return False
         return True
     finally:
         try:
@@ -127,7 +137,7 @@ def _download_and_stage(zipball_url):
 def apply_staged_update():
     """If a staged update exists, overwrite the add-in files with it.
 
-    Call this at the very start of run(), BEFORE importing any other add-in modules.
+    Call this at the very start of the add-in, BEFORE importing the commands.
     Returns True if an update was applied.
     """
     if not os.path.isdir(STAGING_DIR):
@@ -166,9 +176,10 @@ def check_for_update(notify_callback):
     """Check GitHub for a newer release in a background thread.
 
     Args:
-        notify_callback: Called with (new_version_str,) on the main thread if an
-                         update was downloaded and staged. The callback should show
-                         a message telling the user to restart Fusion.
+        notify_callback: Called with (new_version_str,) from the background
+                         thread if an update was downloaded and staged. It
+                         should hand off to the main thread (custom event)
+                         before showing anything.
     """
     def _worker():
         try:
@@ -177,13 +188,13 @@ def check_for_update(notify_callback):
             if result is None:
                 return
 
-            tag, zipball_url = result
+            tag, asset_url = result
             remote_version = _parse_version(tag)
 
             if remote_version <= local_version:
                 return
 
-            success = _download_and_stage(zipball_url)
+            success = _download_and_stage(asset_url)
             if success and notify_callback:
                 notify_callback(tag.lstrip('vV'))
         except Exception:

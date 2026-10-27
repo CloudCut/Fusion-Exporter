@@ -6,19 +6,28 @@ import json
 import os
 import traceback
 import importlib
-import webbrowser
 
-import config
-from lib import utils, geometry_extractor, path_converter, svg_builder, json_builder, handoff
+from ... import config
 
-# Reload order matters: dependencies first
-importlib.reload(config)
-importlib.reload(utils)
-importlib.reload(geometry_extractor)
-importlib.reload(path_converter)
-importlib.reload(svg_builder)
-importlib.reload(json_builder)
-importlib.reload(handoff)
+# The geometry/export libraries are loaded on first use (see _load_libs), not at
+# import time, so the add-in stays inside Fusion's startup-time budget.
+utils = geometry_extractor = path_converter = svg_builder = json_builder = handoff = None
+_libs_loaded = False
+
+
+def _load_libs():
+    global utils, geometry_extractor, path_converter, svg_builder, json_builder, handoff, _libs_loaded
+    if _libs_loaded:
+        return
+    from ...lib import utils as _u, geometry_extractor as _g, path_converter as _p
+    from ...lib import svg_builder as _s, json_builder as _j, handoff as _h
+    if config.DEV_RELOAD:
+        # Reload order matters: dependencies first
+        for m in (_u, _g, _p, _s, _j, _h):
+            importlib.reload(m)
+    utils, geometry_extractor, path_converter = _u, _g, _p
+    svg_builder, json_builder, handoff = _s, _j, _h
+    _libs_loaded = True
 
 # Globals for cleanup
 _handlers = []
@@ -63,7 +72,6 @@ def start():
             existing.deleteMe()
         button = panel.controls.addCommand(cmd_def)
         button.isPromotedByDefault = True
-        button.isPromoted = True
         _buttons.append(button)
 
 
@@ -92,6 +100,7 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
     def notify(self, args):
         try:
+            _load_libs()
             cmd = adsk.core.Command.cast(args.command)
             inputs = cmd.commandInputs
             app = adsk.core.Application.get()
@@ -103,6 +112,9 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                     'Please open a design before exporting.'
                 )
                 return
+
+            # Export settings go on the first tab; the privacy policy has its own
+            inputs = cmd.commandInputs.addTabCommandInput('exportTab', 'Export').children
 
             # Determine document units
             units_mgr = design.unitsManager
@@ -181,6 +193,29 @@ class CommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             # Pre-populate if bodies are already selected
             _rebuild_thickness_dropdown(thickness_dropdown, body_input)
+
+            # Privacy tab: what is sent, and a link to the policy
+            privacy = cmd.commandInputs.addTabCommandInput('privacyTab', 'Privacy').children
+            privacy.addTextBoxCommandInput(
+                'privacyLink', '',
+                'Send to CloudCut uploads the selected geometry to CloudCut.<br><br>'
+                '<a href="{0}">Privacy policy</a>'.format(config.PRIVACY_URL),
+                5, True
+            )
+
+            # About tab: version and links
+            about = cmd.commandInputs.addTabCommandInput('aboutTab', 'About').children
+            about.addTextBoxCommandInput(
+                'aboutText', '',
+                '<b>{0}</b> v{1}<br><br>'
+                '<a href="{2}">CloudCut website</a><br>'
+                '<a href="{3}">CloudCut Workshop</a>'.format(
+                    config.PRODUCT_NAME, config.VERSION, config.WEBSITE_URL, config.WORKSHOP_URL),
+                5, True
+            )
+
+            # Help button in the dialog's lower-left corner
+            cmd.helpFile = config.HELP_FILE
 
             # Connect event handlers
             on_input_changed = InputChangedHandler()
@@ -425,6 +460,7 @@ def _send_export(ui, doc_name, export_groups, output_unit):
         return
 
     utils.log('Sent {} file(s) to CloudCut: {}'.format(len(files), url))
+    import webbrowser
     webbrowser.open(url)
 
 
@@ -495,6 +531,7 @@ def _save_export(ui, doc_name, export_groups, output_unit, export_format, built=
         adsk.core.MessageBoxIconTypes.QuestionIconType
     )
     if result == adsk.core.DialogResults.DialogOK:
+        import webbrowser
         webbrowser.open('https://app.cloudcut.cam')
 
 
@@ -504,6 +541,7 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
     def notify(self, args):
         try:
+            _load_libs()
             app = adsk.core.Application.get()
             ui = app.userInterface
             design = adsk.fusion.Design.cast(app.activeProduct)

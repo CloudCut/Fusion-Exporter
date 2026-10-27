@@ -2,9 +2,11 @@
 
 import importlib
 
+from .. import config
 from .exportSVG import entry as exportSVG_entry
 
-importlib.reload(exportSVG_entry)
+if config.DEV_RELOAD:
+    importlib.reload(exportSVG_entry)
 
 
 def start():

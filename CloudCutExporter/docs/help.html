@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Send to CloudCut Help</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #ffffff; --accent: #0a66c2; --rule: #d2d2d7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #f2f2f7; --muted: #a1a1a6; --bg: #1c1c1e; --accent: #5aa9ff; --rule: #3a3a3c; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.55 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 56px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  .lede { color: var(--muted); margin: 0; }
+  a { color: var(--accent); }
+  li { margin: 4px 0; }
+  dt { font-weight: 600; margin-top: 10px; }
+  dd { margin: 2px 0 0 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Send to CloudCut</h1>
+<p class="lede">Send flat parts from your Fusion design to CloudCut to make CNC toolpaths, or save them as JSON or SVG files.</p>
+
+<h2>Where to find it</h2>
+<p>The <b>Send to CloudCut</b> button appears in three places:</p>
+<ul>
+  <li><b>Design</b> workspace, <b>Solid</b> tab, <b>Create</b> panel</li>
+  <li><b>Design</b> workspace, <b>Utilities</b> tab, <b>Add-ins</b> panel</li>
+  <li><b>Manufacture</b> workspace, <b>Actions</b> panel</li>
+</ul>
+
+<h2>Sending parts</h2>
+<ol>
+  <li>Select the bodies you want to cut, then click <b>Send to CloudCut</b>. You can also pick bodies once the dialog is open.</li>
+  <li>Check the <b>Name</b>. It is used for the CloudCut job names and saved file names.</li>
+  <li>Choose <b>Output Units</b> and leave <b>Output</b> set to <b>Send to CloudCut</b>.</li>
+  <li>Click <b>OK</b>. Your browser opens CloudCut; sign in to claim the parts. You get one job per material thickness.</li>
+</ol>
+
+<h2>Dialog options</h2>
+<dl>
+  <dt>Bodies</dt>
+  <dd>The parts to export. Each should be a flat, extruded part: the exporter reads its planar faces for outlines, holes and pockets.</dd>
+  <dt>Output</dt>
+  <dd><b>Send to CloudCut</b> uploads the parts. <b>Save JSON file</b> and <b>Save SVG file</b> save one file per thickness on your computer instead, plus a <code>_debug.txt</code> report.</dd>
+  <dt>Appearances / Thicknesses</dt>
+  <dd>Untick an appearance or thickness to leave those bodies out of the export.</dd>
+  <dt>Privacy tab</dt>
+  <dd>A link to CloudCut's privacy policy.</dd>
+</dl>
+
+<h2>What is sent</h2>
+<p>Nothing leaves your computer until you click OK with <b>Send to CloudCut</b> selected. Then the add-in uploads the geometry of the parts you selected, the name you entered, and the add-in's name and version. You do not need to be signed in to send; the upload is linked to your account only when you open the link and sign in. Unclaimed uploads are deleted after about 7 days. See the <a href="https://cloudcut.cam/privacy-policy/">privacy policy</a> for details (a <a href="privacy.html">copy</a> is included with the add-in).</p>
+
+<h2>Troubleshooting</h2>
+<dl>
+  <dt>"No exportable geometry found"</dt>
+  <dd>The selected bodies have no flat faces to read. Make sure they are extruded flat parts, not curved or sculpted bodies.</dd>
+  <dt>"Couldn't reach CloudCut"</dt>
+  <dd>Check your internet connection. When asked, you can save the export as JSON files instead and import them in CloudCut later.</dd>
+  <dt>Two Send to CloudCut buttons</dt>
+  <dd>Both CloudCut (from the Autodesk App Store) and CloudCut Direct (downloaded straight from CloudCut) are installed. You only need one; turn the other off in <b>Utilities &gt; Add-ins</b>.</dd>
+  <dt>Turning the add-in off</dt>
+  <dd>Open <b>Utilities &gt; Add-ins</b>, select CloudCut and click <b>Stop</b>. Clear <b>Run on Startup</b> to keep it off.</dd>
+</dl>
+
+<h2>Support</h2>
+<p>Email <a href="mailto:cloudcutapp@gmail.com">cloudcutapp@gmail.com</a> or visit <a href="https://cloudcut.cam">cloudcut.cam</a>.</p>
+</main>
+</body>
+</html>

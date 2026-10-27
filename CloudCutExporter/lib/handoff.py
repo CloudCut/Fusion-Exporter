@@ -9,7 +9,7 @@ import json
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-import config
+from .. import config
 
 
 class SendError(Exception):
@@ -19,7 +19,7 @@ class SendError(Exception):
 def send_handoff(files):
     """POST files ([{'name', 'content'}]) to CloudCut; return the shop URL to open."""
     payload = {
-        'source': {'app': 'fusion', 'version': config.VERSION},
+        'source': {'app': config.SOURCE_APP, 'version': config.VERSION},
         'files': files,
     }
     req = Request(
@@ -28,7 +28,7 @@ def send_handoff(files):
         method='POST',
     )
     req.add_header('Content-Type', 'application/json')
-    req.add_header('User-Agent', 'CloudCutExporter/{}'.format(config.VERSION))
+    req.add_header('User-Agent', '{}/{}'.format(config.ADDIN_NAME, config.VERSION))
 
     try:
         with urlopen(req, timeout=30) as resp:

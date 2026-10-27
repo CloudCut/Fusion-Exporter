@@ -6,3 +6,4 @@ __pycache__/
 .idea/
 Onshape Exporter Build Guide.md
 .claude/settings.local.json
+dist/

@@ -4,9 +4,10 @@
     "id": "com.cloudcut.exporter",
     "author": "CloudCut",
     "description": {
-        "": "Export design geometry as SVG files for CNC toolpath generation."
+        "": "Send flat parts from your design to CloudCut for CNC toolpath generation, or save them as JSON/SVG."
     },
-    "version": "1.4.1",
-    "runOnStartup": false,
-    "supportedOS": "windows|mac"
+    "version": "1.5.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "helpFilename": "docs/help.html"
 }
